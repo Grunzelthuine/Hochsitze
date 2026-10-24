@@ -1,0 +1,8 @@
+{
+ "enc": "aes-gcm-v1",
+ "hinweis": "Verschlüsselte Daten",
+ "iter": 150000,
+ "salt": "U3/R/2bw+MdcIiBi/q8GoQ==",
+ "iv": "uDK3z6rDSdt9sqDn",
+ "data": "ta+OemjzHUfTITdKXXKWdlmiWC4Ab4kcQrAryQdIDFtywmtfvx//wU0/HqUNKNsVP3vbJ7AEPPnItDuLwZgyW4YgMQWS02oWH2WaVBlK8ITSe/SiT2i6sEjCeaG4Aqj7shxd8J0DV4vbCgKuMBQpvMBd+PA8+1OL0f6v5uaKs9A4qhP2Kj59qmvXKmgbgArxg63Rxc2RMNTHHu/DSJczs7W4KbK5f0zwpzD/LYlU3BX5B4dwUnJq/feC9cEi1JrU7+7CwKfKsWRNcf6HtE6XIh9bCm0h1e2tk1vFm2ZxJajayJHkQcGIic7/oUzNam3NqSiDoQTRQifcLHdonWHzNF9tWUWlf9sUzsr5uCZXEvWdY2XTY0GTRslxG8p5d/dZL2Yug/8DPPYCPDaYDDfZtKoCJ7J70Igtuk9b2YeTElCQc+J6lKVwY/hDvQ1104K7f3/VmI0RxYHxxOERPLkaQCUjncrEeT8P4ox0LaXLpvyS5P/c7AL9MhPpvnp2Z8wss31eMXwD7Lw0/rMQw3R7vuS1XkHesnax24Csdd81C3rnhhkODJkLHcztVXc/q8VHxj9z0Pf2KO1ffOt0xJ2JEoKZlZxqZ3yhsJj7NpXxiKfKIlAViV4vO/4VQZBYh5J3RrRmgSSq8UkmcjgnL8TkBs65hyxSn2w5odNfKH3n"
+}
