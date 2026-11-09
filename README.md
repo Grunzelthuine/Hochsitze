@@ -21,6 +21,10 @@ Eigenständige Test-App (PWA), die später in die App „Jagd Thuine“ einflie�
 ## Neu in v1.2.0
 - **Entfernung messen** (Lineal-Knopf rechts auf der Karte, für alle, nichts wird gespeichert): Start ist der Hochsitz, an dem man sitzt (≤ 25 m per GPS), sonst die eigene Position oder ein angetippter Punkt. Jedes Antippen setzt ein Ziel mit Entfernung und Richtung; Ringe bei 50/100/150/200 m. Ziel antippen = entfernen, Start ist ziehbar.
 
+## Neu in v1.3.0
+- **Wind** oben links auf der Karte: Richtung (Pfeil zeigt, wohin der Wind weht; Text „aus SW“), Geschwindigkeit und Böen in km/h. Quelle: Deutscher Wetterdienst – aktuelle Messung der nächsten DWD-Station und MOSMIX-Vorhersage über [Bright Sky](https://brightsky.dev); falls nicht erreichbar: DWD-Modell ICON über [Open-Meteo](https://open-meteo.com). Aktualisierung alle 10 Minuten.
+- Antippen: Vorhersage für die nächsten 12 Stunden und Wind an allen Sitzen mit Blickrichtung (von vorn = günstig, im Rücken = ungünstig, Seitenwind). Dieselbe Bewertung steht im Hochsitz-Detail.
+
 ## Daten
 - `data/hochsitze.json`: verschlüsselt (AES-GCM, PBKDF2-SHA256 150.000), gleiches Format wie `strecke.json` in Jagd Thuine.
 - `data/fotos/*.bin`: verschlüsselte JPEGs (Format „SBE1“ wie die Dokumente in Jagd Thuine), jeweils mit Vorschaubild `-t.bin`.

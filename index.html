@@ -6,7 +6,7 @@
 <title>Hochsitze Thuine</title>
 <meta name="theme-color" content="#1f4a24">
 <meta name="robots" content="noindex, nofollow, noarchive">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://server.arcgisonline.com https://tile.openstreetmap.org https://sgx.geodatenzentrum.de; font-src 'self' data:; connect-src 'self' https://api.github.com https://raw.githubusercontent.com https://server.arcgisonline.com https://tile.openstreetmap.org https://sgx.geodatenzentrum.de; manifest-src 'self'; worker-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://server.arcgisonline.com https://tile.openstreetmap.org https://sgx.geodatenzentrum.de; font-src 'self' data:; connect-src 'self' https://api.github.com https://api.brightsky.dev https://api.open-meteo.com https://raw.githubusercontent.com https://server.arcgisonline.com https://tile.openstreetmap.org https://sgx.geodatenzentrum.de; manifest-src 'self'; worker-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="strict-origin-when-cross-origin">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -15,7 +15,7 @@
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
 <link rel="stylesheet" href="vendor/leaflet.css?v=1.9.4">
-<link rel="stylesheet" href="style.css?v=1.2.0">
+<link rel="stylesheet" href="style.css?v=1.3.0">
 </head>
 <body>
 <header class="topbar">
@@ -37,6 +37,7 @@
 <main id="main">
   <section id="view-karte" class="view" data-view="karte">
     <div id="map" class="map" aria-label="Karte der Hochsitze"></div>
+    <button class="wind-badge" id="windBadge" aria-label="Wind"></button>
     <div class="map-ctl map-ctl-tr">
       <button class="map-btn" id="layerBtn" aria-label="Kartenart wechseln" title="Kartenart">
         <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="m12 3 9 5-9 5-9-5Z"/><path d="m3 13 9 5 9-5"/></svg>
@@ -114,6 +115,6 @@
 <div id="toast" class="toast" hidden></div>
 
 <script src="vendor/leaflet.js?v=1.9.4"></script>
-<script src="app.js?v=1.2.0"></script>
+<script src="app.js?v=1.3.0"></script>
 </body>
 </html>

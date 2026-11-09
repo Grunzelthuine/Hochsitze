@@ -7,7 +7,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.3.0';
 const LS_CFG = 'hs.cfg.v1';
 const LS_DATA = 'hs.data.v1';
 const LS_PW = 'hs.pw.v1';
@@ -448,6 +448,7 @@ function initMap() {
   };
   $('#histBtn').onclick = () => toggleHist();
   $('#fitBtn').onclick = () => fitAll(true);
+  $('#windBadge').onclick = () => { openWind(); loadWind(); };
   $('#measureBtn').onclick = () => (meas.on ? stopMeasure() : startMeasure());
   $('#measDone').onclick = () => stopMeasure();
   $('#measClear').onclick = () => { meas.targets = []; drawMeasure(); };
@@ -645,6 +646,84 @@ function drawMeasure() {
   measInfo(`Start: <b>${esc(st.label)}</b>${last ? ` · letztes Ziel <b>${distTxt(distM(st, last))}</b> · Ziel antippen = weg` : ' · Ziel in die Karte tippen'}`);
 }
 
+
+/* ================= Wind (ab 1.3.0) – Deutscher Wetterdienst über Bright Sky, Ersatz: Open-Meteo (DWD ICON) ================= */
+const LS_WIND = 'hs.wind.v1';
+const wind = { cur: lsGet(LS_WIND, null), fc: null, loading: false, at: 0 };
+const angDiff = (a, b) => { const d = Math.abs((((a - b) % 360) + 360) % 360); return d > 180 ? 360 - d : d; };
+function windPos() {
+  const pts = [...state.data.sitze, ...state.data.lecken];
+  if (!pts.length) return { lat: THUINE[0], lng: THUINE[1] };
+  return { lat: pts.reduce((a, p) => a + p.lat, 0) / pts.length, lng: pts.reduce((a, p) => a + p.lng, 0) / pts.length };
+}
+function bft(kmh) { const t = [1, 6, 12, 20, 29, 39, 50, 62, 75, 89, 103, 118]; let i = 0; while (i < t.length && kmh >= t[i]) i++; return i; }
+async function fetchJson(url) { const r = await fetch(url, { cache: 'no-store' }); if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); }
+async function loadWind(force = false) {
+  if (wind.loading || (!force && Date.now() - wind.at < 9 * 60 * 1000)) return;
+  wind.loading = true; $('#windBadge')?.classList.add('busy');
+  const p = windPos(), la = p.lat.toFixed(4), lo = p.lng.toFixed(4);
+  try {
+    try {
+      const j = await fetchJson(`https://api.brightsky.dev/current_weather?lat=${la}&lon=${lo}&tz=Europe/Berlin`);
+      const w = j.weather || {}, src = (j.sources || []).find(x => x.id === w.source_id) || (j.sources || [])[0] || {};
+      if (w.wind_direction_10 == null && w.wind_speed_10 == null) throw new Error('keine Winddaten');
+      wind.cur = { dir: w.wind_direction_10, speed: w.wind_speed_10, gust: w.wind_gust_speed_10, zeit: w.timestamp, station: src.station_name || '', dist: src.distance, quelle: 'DWD-Messstation (Bright Sky)', abruf: new Date().toISOString() };
+      try {
+        const now = new Date(), end = new Date(now.getTime() + 13 * 3600e3);
+        const f = await fetchJson(`https://api.brightsky.dev/weather?lat=${la}&lon=${lo}&date=${encodeURIComponent(now.toISOString())}&last_date=${encodeURIComponent(end.toISOString())}&tz=Europe/Berlin`);
+        wind.fc = (f.weather || []).filter(x => new Date(x.timestamp) > now).slice(0, 12).map(x => ({ zeit: x.timestamp, dir: x.wind_direction, speed: x.wind_speed, gust: x.wind_gust_speed }));
+        wind.fcQuelle = 'DWD-Vorhersage MOSMIX (Bright Sky)';
+      } catch { wind.fc = null; }
+    } catch {
+      const j = await fetchJson(`https://api.open-meteo.com/v1/forecast?latitude=${la}&longitude=${lo}&current=wind_speed_10m,wind_direction_10m,wind_gusts_10m&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m&models=icon_seamless&wind_speed_unit=kmh&timezone=Europe%2FBerlin&forecast_hours=13`);
+      const c = j.current || {};
+      wind.cur = { dir: c.wind_direction_10m, speed: c.wind_speed_10m, gust: c.wind_gusts_10m, zeit: c.time, station: '', quelle: 'DWD-Modell ICON (Open-Meteo)', abruf: new Date().toISOString() };
+      const h = j.hourly || {}, now = Date.now();
+      wind.fc = (h.time || []).map((t, i) => ({ zeit: t, dir: h.wind_direction_10m[i], speed: h.wind_speed_10m[i], gust: h.wind_gusts_10m[i] })).filter(x => new Date(x.zeit).getTime() > now).slice(0, 12);
+      wind.fcQuelle = 'DWD-Modell ICON (Open-Meteo)';
+    }
+    wind.at = Date.now();
+    lsSet(LS_WIND, wind.cur);
+  } catch { /* offline – letzter Stand bleibt */ }
+  finally { wind.loading = false; renderWind(); }
+}
+const windArrow = (dir, size = 26) => dir == null ? '' : `<svg viewBox="0 0 24 24" width="${size}" height="${size}" style="transform:rotate(${Math.round(dir + 180)}deg)" aria-hidden="true"><path d="M12 2 18.5 20 12 16 5.5 20Z" fill="currentColor"/></svg>`;
+const zeitHM = iso => iso ? new Date(iso).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '–';
+function windAlt(c) { if (!c?.abruf) return ''; const min = (Date.now() - new Date(c.zeit || c.abruf).getTime()) / 60000; return min > 90 ? ' (älter)' : ''; }
+function renderWind() {
+  const b = $('#windBadge'); if (!b) return;
+  const c = wind.cur;
+  b.classList.toggle('busy', wind.loading);
+  if (!c || c.speed == null) { b.innerHTML = '<span class="w-txt"><b>Wind</b><small>lädt …</small></span>'; return; }
+  b.innerHTML = `<span class="w-arrow">${windArrow(c.dir)}</span><span class="w-txt"><b>aus ${c.dir == null ? '–' : dirName(c.dir)} · ${Math.round(c.speed)} km/h</b><small>${c.gust != null ? `Böen ${Math.round(c.gust)} · ` : ''}${zeitHM(c.zeit)}${windAlt(c)}</small></span>`;
+}
+/** Wind gegenüber Blickrichtung des Sitzes */
+function windFuerSitz(s) {
+  const c = wind.cur;
+  if (!c || c.dir == null || c.speed == null) return '';
+  const base = `aus ${dirName(c.dir)} (${Math.round(c.dir)}°), ${Math.round(c.speed)} km/h`;
+  if (s.richtung == null) return base;
+  if (c.speed < 4) return `${base} – kaum Wind, kann umlaufen`;
+  const d = angDiff(c.dir, s.richtung);
+  if (d <= 60) return `${base} – <b style="color:var(--green)">von vorn, günstig</b>`;
+  if (d >= 120) return `${base} – <b style="color:var(--warn)">im Rücken, ungünstig</b>`;
+  return `${base} – <b style="color:var(--brass)">Seitenwind</b>`;
+}
+function openWind() {
+  const c = wind.cur;
+  const body = c ? `
+    <div class="card pad wind-now"><span class="w-big">${windArrow(c.dir, 54)}</span>
+      <div><div class="w-dir">Wind aus ${c.dir == null ? '–' : `${dirName(c.dir)} <small>(${Math.round(c.dir)}°)</small>`}</div>
+      <div class="w-spd">${c.speed == null ? '–' : Math.round(c.speed)} km/h${c.gust != null ? ` · Böen ${Math.round(c.gust)} km/h` : ''}</div>
+      <div class="sub">${c.speed != null ? `Stärke ${bft(c.speed)} Bft · ` : ''}Stand ${zeitHM(c.zeit)}${windAlt(c)}</div></div></div>
+    <p class="hint">Quelle: ${esc(c.quelle)}${c.station ? `, Station ${esc(c.station)}${c.dist ? ` (${distTxt(c.dist)} entfernt)` : ''}` : ''}. Der Pfeil zeigt, wohin der Wind weht.</p>
+    ${wind.fc?.length ? `<h2 class="section">Nächste Stunden</h2><div class="card"><ul class="wind-fc">${wind.fc.map(f => `<li><span class="t">${zeitHM(f.zeit)}</span><span class="a">${windArrow(f.dir, 18)}</span><span class="d">aus ${f.dir == null ? '–' : dirName(f.dir)}</span><span class="v">${f.speed == null ? '–' : Math.round(f.speed)} km/h</span><span class="g">${f.gust != null ? `Böen ${Math.round(f.gust)}` : ''}</span></li>`).join('')}</ul></div><p class="hint">Vorhersage: ${esc(wind.fcQuelle || '')}</p>` : ''}
+    ${state.data.sitze.some(s => s.richtung != null) ? `<h2 class="section">Wind an den Sitzen (jetzt)</h2><div class="card pad"><ul class="hist">${state.data.sitze.filter(s => s.richtung != null).map(s => `<li><i></i><div><b>${esc(s.name)}</b> · Blick ${dirName(s.richtung)}<small>${windFuerSitz(s)}</small></div></li>`).join('')}</ul></div>` : ''}`
+    : '<p class="hint">Noch keine Winddaten – bitte Internetverbindung prüfen.</p>';
+  openSheet('Wind', body, `<button class="btn secondary" id="windReload">Aktualisieren</button>`);
+  $('#windReload').onclick = async () => { await loadWind(true); openWind(); };
+}
+
 /* ================= Ansichten ================= */
 function render() {
   $('#addBtn').hidden = !isAdmin() || meas.on;
@@ -800,6 +879,7 @@ function openDetail(id) {
     ${s.bemerkung ? `<div class="note">${esc(s.bemerkung)}</div>` : ''}
     <dl class="facts">
       <dt>Blickrichtung</dt><dd>${dirTxt(s.richtung)}</dd>
+      ${windFuerSitz(s) ? `<dt>Wind jetzt</dt><dd>${windFuerSitz(s)}</dd>` : ''}
       ${me ? `<dt>Entfernung</dt><dd>${distM(me, s) <= Math.max(10, me.acc || 0) ? 'Du bist am Sitz' : `${distTxt(distM(me, s))} Richtung ${dirName(bearing(me, s))}`}</dd>` : ''}
       <dt>Steht hier seit</dt><dd>${dateDE(s.seit)}</dd>
       <dt>Koordinaten</dt><dd>${coordTxt(s)}${s.acc ? ` <span class="sub">(±${Math.round(s.acc)} m)</span>` : ''}</dd>
@@ -1729,8 +1809,11 @@ setInterval(() => { if (document.visibilityState === 'visible' && $('#sheet').hi
   initMap();
   switchTab(state.view.tab === 'liste' ? 'liste' : 'karte', true);
   await loadCached();
+  renderWind();
   load._last = Date.now();
   await load();
+  loadWind(true);
+  setInterval(() => { if (document.visibilityState === 'visible') loadWind(); }, 60 * 1000);
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
     navigator.serviceWorker.register('sw.js').then(reg => {
       reg.addEventListener('updatefound', () => {
