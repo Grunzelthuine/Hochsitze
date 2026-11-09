@@ -15,7 +15,7 @@
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
 <link rel="stylesheet" href="vendor/leaflet.css?v=1.9.4">
-<link rel="stylesheet" href="style.css?v=1.1.0">
+<link rel="stylesheet" href="style.css?v=1.2.0">
 </head>
 <body>
 <header class="topbar">
@@ -44,6 +44,9 @@
       <button class="map-btn" id="histBtn" aria-label="Alte Standorte zeigen" title="Alte Standorte">
         <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/></svg>
       </button>
+      <button class="map-btn" id="measureBtn" aria-label="Entfernung messen" title="Entfernung messen">
+        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 16.5 16.5 3.5l4 4-13 13Z"/><path d="m7 13 2 2M10 10l2 2M13 7l2 2"/></svg>
+      </button>
       <button class="map-btn" id="fitBtn" aria-label="Alle Hochsitze zeigen" title="Alle zeigen">
         <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
       </button>
@@ -56,6 +59,10 @@
     <button class="fab" id="addBtn" hidden>
       <span class="fab-plus">+</span> Erfassen
     </button>
+    <div id="measBar" class="meas-bar" hidden>
+      <div class="meas-txt" id="measTxt"></div>
+      <div class="meas-btns"><button class="btn secondary small" id="measStart">Start neu</button><button class="btn secondary small" id="measClear">Ziele löschen</button><button class="btn small" id="measDone">Fertig</button></div>
+    </div>
     <div id="layerName" class="layer-name" hidden></div>
   </section>
   <section id="view-liste" class="view" data-view="liste" hidden></section>
@@ -107,6 +114,6 @@
 <div id="toast" class="toast" hidden></div>
 
 <script src="vendor/leaflet.js?v=1.9.4"></script>
-<script src="app.js?v=1.1.0"></script>
+<script src="app.js?v=1.2.0"></script>
 </body>
 </html>

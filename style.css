@@ -289,3 +289,20 @@ legend { font: 600 15px var(--serif); color: var(--green); padding: 0 6px; }
 .hist li i.w-kontrolliert { border-color: #3c6e8f; }
 .hist li i.w-repariert { border-color: var(--brass); background: var(--brass-soft); }
 .check input[type=checkbox] { flex: none; }
+
+/* ---------- 1.2.0: Entfernung messen ---------- */
+.meas-bar { position: absolute; z-index: 600; left: 10px; right: 10px; bottom: 12px; padding: 10px 12px; border-radius: 14px; background: rgba(242, 240, 223, .97); border: 1px solid var(--line); box-shadow: 0 4px 16px rgba(0,0,0,.25); display: grid; gap: 8px; }
+.meas-txt { font-size: 13.5px; color: var(--muted); }
+.meas-txt b { color: var(--ink); }
+.meas-btns { display: flex; gap: 6px; }
+.meas-btns .btn { flex: 1; min-height: 38px; padding: 6px 8px; font-size: 13.5px; }
+.map.measuring { cursor: crosshair; }
+.map.measuring ~ .map-ctl-br { bottom: 118px; }
+.meas-start { background: none; border: 0; }
+.meas-start i { display: block; width: 22px; height: 22px; border-radius: 50%; background: #ffd54a; border: 3px solid #fff; box-shadow: 0 1px 5px rgba(0,0,0,.5); }
+.meas-t { background: none; border: 0; }
+.meas-t i { display: block; width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 3px solid #ffb300; box-shadow: 0 1px 4px rgba(0,0,0,.5); }
+.meas-lbl { background: rgba(34,48,29,.9) !important; border: 0 !important; color: #fff !important; font: 600 13px var(--sans) !important; padding: 3px 8px !important; border-radius: 7px !important; box-shadow: 0 1px 4px rgba(0,0,0,.3) !important; white-space: nowrap; }
+.meas-lbl::before { display: none !important; }
+.meas-lbl small { font-weight: 400; opacity: .8; }
+.ring-lbl { background: none; border: 0; color: #fff; font: 700 10.5px/14px var(--sans); text-align: center; text-shadow: 0 0 3px #000, 0 0 2px #000; pointer-events: none; }

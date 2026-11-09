@@ -7,7 +7,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.0';
 const LS_CFG = 'hs.cfg.v1';
 const LS_DATA = 'hs.data.v1';
 const LS_PW = 'hs.pw.v1';
@@ -448,6 +448,11 @@ function initMap() {
   };
   $('#histBtn').onclick = () => toggleHist();
   $('#fitBtn').onclick = () => fitAll(true);
+  $('#measureBtn').onclick = () => (meas.on ? stopMeasure() : startMeasure());
+  $('#measDone').onclick = () => stopMeasure();
+  $('#measClear').onclick = () => { meas.targets = []; drawMeasure(); };
+  $('#measStart').onclick = () => { meas.wait = 'start'; measInfo('<b>Neuen Startpunkt</b> in die Karte tippen (Hochsitz antippen = genau dort)'); };
+  map.on('click', e => { if (meas.on) measTap(e.latlng); });
   $('#locBtn').onclick = () => locate();
   $('#addBtn').onclick = () => openAddChoice();
 }
@@ -484,31 +489,32 @@ function sitzIcon(s, pending) {
 function renderMap() {
   if (!map) return;
   sitzLayer.clearLayers(); histLayer.clearLayers(); flLayer.clearLayers();
+  if (meas.on) drawMeasure();
   const pend = pendingIds();
   for (const s of state.data.sitze) {
     if (s.flaeche) {
       const pg = L.polygon(s.flaeche.pts, { color: '#e8d24a', weight: 2, fillColor: '#f2e27a', fillOpacity: .22 });
       pg.bindTooltip(`Freifläche ${esc(s.name)} · ${areaTxt(s.flaeche.m2)}`, { sticky: true });
-      pg.on('click', () => openDetail(s.id));
+      pg.on('click', e => pick(e, () => openDetail(s.id), `Freifläche ${s.name}`));
       flLayer.addLayer(pg);
     }
     if (s.kirrung) {
       const km = L.marker([s.kirrung.lat, s.kirrung.lng], { icon: kirrIcon(), title: `Kirrung ${s.name}` });
       km.bindTooltip(`Kirrung · ${esc(s.name)}<br><small>${distTxt(distM(s, s.kirrung))} vom Sitz</small>`, { direction: 'top' });
-      km.on('click', () => openDetail(s.id));
+      km.on('click', e => pick(e, () => openDetail(s.id), `Kirrung ${s.name}`));
       flLayer.addLayer(km);
     }
   }
   for (const l of state.data.lecken) {
     const m = L.marker([l.lat, l.lng], { icon: leckeIcon(pend.has(l.id)), title: l.name });
     m.bindTooltip(esc(l.name), { permanent: true, direction: 'bottom', className: 'hs-label', offset: [0, 4] });
-    m.on('click', () => openLecke(l.id));
+    m.on('click', e => pick(e, () => openLecke(l.id), l.name));
     sitzLayer.addLayer(m);
   }
   for (const s of state.data.sitze) {
     const m = L.marker([s.lat, s.lng], { icon: sitzIcon(s, pend.has(s.id)), keyboard: true, title: s.name, riseOnHover: true });
     m.bindTooltip(esc(s.name), { permanent: true, direction: 'bottom', className: 'hs-label', offset: [0, 4] });
-    m.on('click', () => openDetail(s.id));
+    m.on('click', e => pick(e, () => openDetail(s.id), s.name));
     sitzLayer.addLayer(m);
     let prev = [s.lat, s.lng];
     for (const v of s.verlauf) {
@@ -516,7 +522,7 @@ function renderMap() {
       histLayer.addLayer(L.polyline([prev, p], { color: '#333', weight: 2, dashArray: '5 6', opacity: .75, interactive: false }));
       const om = L.marker(p, { icon: L.divIcon({ className: 'hs-old', iconSize: [12, 12], iconAnchor: [6, 6], html: '<i></i>' }) });
       om.bindTooltip(`${esc(s.name)}<br><small>bis ${dateDE(v.bis)}</small>`, { direction: 'top' });
-      om.on('click', () => openDetail(s.id));
+      om.on('click', e => pick(e, () => openDetail(s.id), `${s.name} (alt)`));
       histLayer.addLayer(om);
       prev = p;
     }
@@ -566,9 +572,82 @@ function stopLocate() {
   state.me = null;
 }
 
+
+/* ================= Entfernung messen (ab 1.2.0, nur auf dem Gerät, nichts wird gespeichert) ================= */
+const meas = { on: false, start: null, targets: [], layer: null, wait: false };
+/** Klick auf Kartenobjekt: im Messmodus als Ziel/Start nehmen, sonst normal öffnen */
+function pick(e, fn, label) {
+  if (!meas.on) { fn(); return; }
+  if (e?.originalEvent) L.DomEvent.stop(e);
+  measTap(e.latlng || e.target.getLatLng(), label);
+}
+function startMeasure() {
+  meas.on = true; meas.targets = []; meas.start = null; meas.wait = false;
+  meas.layer = L.layerGroup().addTo(map);
+  $('#measureBtn').classList.add('on'); $('#addBtn').hidden = true;
+  $('#map').classList.add('measuring');
+  const bar = $('#measBar'); bar.hidden = false;
+  const fromPos = me => {
+    const near = [...state.data.sitze].map(x => ({ x, d: distM(me, x) })).sort((a, b) => a.d - b.d)[0];
+    if (near && near.d <= Math.max(25, me.acc || 0)) setMeasStart({ lat: near.x.lat, lng: near.x.lng }, near.x.name);
+    else setMeasStart({ lat: me.lat, lng: me.lng }, 'Mein Standort');
+  };
+  if (state.me) fromPos(state.me);
+  else if (navigator.geolocation) {
+    measInfo('Suche Standort … oder Startpunkt in die Karte tippen');
+    meas.wait = true;
+    navigator.geolocation.getCurrentPosition(p => {
+      if (!meas.on || meas.start) return;
+      state.me = { lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy };
+      fromPos(state.me);
+    }, () => { if (meas.on && !meas.start) measInfo('Kein GPS – Startpunkt (z. B. Hochsitz) in die Karte tippen'); }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 });
+  } else measInfo('Startpunkt (z. B. Hochsitz) in die Karte tippen');
+}
+function stopMeasure() {
+  meas.on = false; if (meas.layer) { map.removeLayer(meas.layer); meas.layer = null; }
+  meas.targets = []; meas.start = null;
+  $('#measureBtn').classList.remove('on'); $('#measBar').hidden = true; $('#map').classList.remove('measuring');
+  $('#addBtn').hidden = !isAdmin();
+}
+function measInfo(txt) { $('#measTxt').innerHTML = txt; }
+function setMeasStart(ll, label) {
+  meas.start = { lat: ll.lat, lng: ll.lng, label: label || 'Start' }; meas.wait = false;
+  if (!map.getBounds().contains([ll.lat, ll.lng])) map.setView([ll.lat, ll.lng], Math.max(map.getZoom(), 17));
+  drawMeasure();
+}
+function measTap(ll, label) {
+  if (!meas.start || meas.wait === 'start') { setMeasStart(ll, label || 'Startpunkt'); return; }
+  meas.targets.push({ lat: ll.lat, lng: ll.lng, label: label || '' });
+  if (navigator.vibrate) navigator.vibrate(20);
+  drawMeasure();
+}
+function drawMeasure() {
+  const L0 = meas.layer; if (!L0) return; L0.clearLayers();
+  const st = meas.start; if (!st) return;
+  [50, 100, 150, 200].forEach(r => {
+    L0.addLayer(L.circle([st.lat, st.lng], { radius: r, color: '#fff', weight: 1, opacity: .7, dashArray: '2 5', fill: false, interactive: false }));
+    const lbl = L.marker([st.lat + r / 111195, st.lng], { interactive: false, icon: L.divIcon({ className: 'ring-lbl', iconSize: [40, 14], iconAnchor: [20, 7], html: `${r} m` }) });
+    L0.addLayer(lbl);
+  });
+  const sm = L.marker([st.lat, st.lng], { draggable: true, zIndexOffset: 900, icon: L.divIcon({ className: 'meas-start', iconSize: [22, 22], iconAnchor: [11, 11], html: '<i></i>' }) });
+  sm.on('drag', e => { st.lat = e.latlng.lat; st.lng = e.latlng.lng; });
+  sm.on('dragend', () => { st.label = 'Startpunkt'; drawMeasure(); });
+  L0.addLayer(sm);
+  meas.targets.forEach((t, i) => {
+    const d = distM(st, t), b = bearing(st, t);
+    L0.addLayer(L.polyline([[st.lat, st.lng], [t.lat, t.lng]], { color: '#ffd54a', weight: 3, opacity: .95, interactive: false }));
+    const tm = L.marker([t.lat, t.lng], { zIndexOffset: 950, icon: L.divIcon({ className: 'meas-t', iconSize: [14, 14], iconAnchor: [7, 7], html: '<i></i>' }) });
+    tm.bindTooltip(`<b>${distTxt(d)}</b> · ${Math.round(b)}° ${dirName(b)}${t.label ? `<br><small>${esc(t.label)}</small>` : ''}`, { permanent: true, direction: 'auto', className: 'meas-lbl', offset: [0, 0] });
+    tm.on('click', e => { L.DomEvent.stop(e); meas.targets.splice(i, 1); drawMeasure(); });
+    L0.addLayer(tm);
+  });
+  const last = meas.targets[meas.targets.length - 1];
+  measInfo(`Start: <b>${esc(st.label)}</b>${last ? ` · letztes Ziel <b>${distTxt(distM(st, last))}</b> · Ziel antippen = weg` : ' · Ziel in die Karte tippen'}`);
+}
+
 /* ================= Ansichten ================= */
 function render() {
-  $('#addBtn').hidden = !isAdmin();
+  $('#addBtn').hidden = !isAdmin() || meas.on;
   renderMap();
   if (state.view.tab === 'liste') renderList();
   updateBanner();

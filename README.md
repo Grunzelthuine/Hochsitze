@@ -18,6 +18,9 @@ Eigenständige Test-App (PWA), die später in die App „Jagd Thuine“ einflie�
 - **Freifläche:** Beim Hochsitz „Freifläche ablaufen“: am Rand entlang gehen und an jeder Ecke „Ecke hier setzen“ tippen. Die Ecken lassen sich ziehen, die Fläche wird in m²/ha berechnet. Gelb auf der Karte.
 - **Kirrung:** Ein Punkt (an der eigenen Position oder in der Karte angetippt) mit Entfernung und Richtung vom Sitz.
 
+## Neu in v1.2.0
+- **Entfernung messen** (Lineal-Knopf rechts auf der Karte, für alle, nichts wird gespeichert): Start ist der Hochsitz, an dem man sitzt (≤ 25 m per GPS), sonst die eigene Position oder ein angetippter Punkt. Jedes Antippen setzt ein Ziel mit Entfernung und Richtung; Ringe bei 50/100/150/200 m. Ziel antippen = entfernen, Start ist ziehbar.
+
 ## Daten
 - `data/hochsitze.json`: verschlüsselt (AES-GCM, PBKDF2-SHA256 150.000), gleiches Format wie `strecke.json` in Jagd Thuine.
 - `data/fotos/*.bin`: verschlüsselte JPEGs (Format „SBE1“ wie die Dokumente in Jagd Thuine), jeweils mit Vorschaubild `-t.bin`.
