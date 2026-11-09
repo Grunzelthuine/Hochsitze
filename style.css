@@ -258,3 +258,34 @@ legend { font: 600 15px var(--serif); color: var(--green); padding: 0 6px; }
 
 }
 .map.z-lo .hs-label { display: none; }
+
+/* ---------- 1.1.0: Salzlecken, Freiflächen, Kirrung ---------- */
+.choice { display: flex; align-items: center; gap: 14px; width: 100%; padding: 14px; text-align: left; border: 1px solid var(--line); border-radius: var(--radius); background: var(--paper); box-shadow: var(--shadow); }
+.choice + .choice { margin-top: 10px; }
+.choice .ci { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 50%; color: #fff; flex: none; }
+.choice .ci svg { width: 24px; height: 24px; }
+.choice b { display: block; font: 600 17px var(--serif); color: var(--green); }
+.choice small { color: var(--muted); }
+.hs-pin.lk { border-radius: 6px; }
+.kirr-pin { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; background: #c8901e; color: #fff; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.45); }
+.kirr-pin svg { width: 18px; height: 18px; }
+.fl-v { background: none; border: 0; }
+.fl-v i { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: #e8d24a; border: 2px solid #fff; color: #3a3000; font: 700 10px/1 var(--sans); font-style: normal; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+.mini-map.tall { height: 300px; }
+.fl-info { font-size: 13.5px; color: var(--muted); }
+.fl-info b { color: var(--ink); }
+.btn.on-btn { background: var(--warn); border-color: var(--warn); color: #fff; }
+.list-seg button { min-height: 42px; }
+.lk-row { display: flex; gap: 8px; align-items: stretch; }
+.lk-row + .lk-row { margin-top: 8px; }
+.lk-row .sitz { flex: 1; min-width: 0; }
+.lk-row .sitz + .sitz { margin-top: 0; }
+.tick { flex: none; width: 58px; border-radius: var(--radius); border: 1.5px solid var(--green); background: var(--paper); color: var(--green); font-size: 26px; font-weight: 700; box-shadow: var(--shadow); }
+.tick:active { background: var(--green-soft); }
+.tick.done { background: var(--green); color: #f4f1de; }
+.lk-status { text-align: center; }
+.lk-status .big { font: 600 26px/1.15 var(--serif); color: var(--green); margin: 2px 0; }
+.hist li i.w-bestueckt { background: var(--green); }
+.hist li i.w-kontrolliert { border-color: #3c6e8f; }
+.hist li i.w-repariert { border-color: var(--brass); background: var(--brass-soft); }
+.check input[type=checkbox] { flex: none; }

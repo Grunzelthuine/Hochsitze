@@ -7,7 +7,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.1.0';
 const LS_CFG = 'hs.cfg.v1';
 const LS_DATA = 'hs.data.v1';
 const LS_PW = 'hs.pw.v1';
@@ -25,6 +25,9 @@ const ARTEN = {
   erdsitz: { name: 'Erdsitz / Bodensitz', short: 'Erdsitz', color: '#4d6a2a', icon: '<path d="M3 20h18M5 20v-7l7-4.5 7 4.5v7M9.5 14.5h5"/>' },
   sonst: { name: 'Sonstiges', short: 'Sonstiges', color: '#555b66', icon: '<circle cx="12" cy="12" r="4.5"/>' },
 };
+const LECKE = { name: 'Salzlecke', color: '#3c6e8f', icon: '<path d="M6.5 6.5h11v6h-11Z"/><path d="M12 12.5V21M9 21h6"/>' };
+const KIRR_ICON = '<circle cx="12" cy="12" r="6.5"/><circle cx="10" cy="10.5" r="1" fill="currentColor"/><circle cx="14" cy="11" r="1" fill="currentColor"/><circle cx="11.5" cy="14" r="1" fill="currentColor"/>';
+const WARTUNG = { bestueckt: 'Bestückt', kontrolliert: 'Kontrolliert', repariert: 'Repariert' };
 const ZUSTAND = { gut: 'In Ordnung', maengel: 'Mängel', gesperrt: 'Gesperrt' };
 const DIRS = ['N', 'NO', 'O', 'SO', 'S', 'SW', 'W', 'NW'];
 const LAYERS = {
@@ -166,7 +169,7 @@ const state = {
   remoteExists: false,
   data: { version: 1, sitze: [] }, // remote + eigene, noch nicht hochgeladene Änderungen
   queue: [],
-  view: Object.assign({ layer: 'luftbild', hist: false, tab: 'karte', sort: 'name' }, lsGet(LS_VIEW, {})),
+  view: Object.assign({ layer: 'luftbild', hist: false, tab: 'karte', sort: 'name', liste: 'sitze', lsort: 'alt' }, lsGet(LS_VIEW, {})),
   me: null,              // {lat, lng, acc}
   loaded: false,
 };
@@ -177,23 +180,28 @@ const isAdmin = () => !!(state.cfg.mode === 'voll' && state.cfg.token && state.c
 const saveCfg = () => lsSet(LS_CFG, state.cfg);
 const saveView = () => lsSet(LS_VIEW, state.view);
 const sitzById = id => state.data.sitze.find(s => s.id === id);
+const leckeById = id => state.data.lecken.find(s => s.id === id);
 const pendingIds = () => new Set(state.queue.map(o => o.sitzId));
 
 function normalize(d) {
   d = d && typeof d === 'object' ? d : {};
   d.version ||= 1;
   d.sitze = Array.isArray(d.sitze) ? d.sitze : [];
-  d.sitze.forEach(s => { s.verlauf ||= []; s.zustand ||= 'gut'; s.art ||= 'sonst'; s.bemerkung ||= ''; if (s.richtung === undefined) s.richtung = null; });
+  d.lecken = Array.isArray(d.lecken) ? d.lecken : [];
+  d.lecken.forEach(l => { l.wartung ||= []; l.bemerkung ||= ''; });
+  d.sitze.forEach(s => { if (s.flaeche && !(s.flaeche.pts?.length >= 3)) s.flaeche = null; if (s.kirrung === undefined) s.kirrung = null; s.verlauf ||= []; s.zustand ||= 'gut'; s.art ||= 'sonst'; s.bemerkung ||= ''; if (s.richtung === undefined) s.richtung = null; });
   return d;
 }
 function applyOps(data, ops) {
   const d = normalize(clone(data || {}));
   for (const op of ops) {
-    const i = d.sitze.findIndex(s => s.id === op.sitzId);
-    if (op.t === 'put') { if (i >= 0) d.sitze[i] = clone(op.sitz); else d.sitze.push(clone(op.sitz)); }
-    if (op.t === 'del' && i >= 0) d.sitze.splice(i, 1);
+    const arr = d[op.coll === 'lecken' ? 'lecken' : 'sitze'];
+    const i = arr.findIndex(s => s.id === op.sitzId);
+    if (op.t === 'put') { if (i >= 0) arr[i] = clone(op.sitz); else arr.push(clone(op.sitz)); }
+    if (op.t === 'del' && i >= 0) arr.splice(i, 1);
   }
-  d.sitze.sort((a, b) => a.name.localeCompare(b.name, 'de', { numeric: true }));
+  const byName = (a, b) => a.name.localeCompare(b.name, 'de', { numeric: true });
+  d.sitze.sort(byName); d.lecken.sort(byName);
   return d;
 }
 function rebuild() {
@@ -422,12 +430,13 @@ async function prepPhoto(file, kind) {
 }
 
 /* ================= Karte ================= */
-let map, baseLayer, sitzLayer, histLayer, meMarker, meCircle;
+let map, baseLayer, sitzLayer, histLayer, flLayer, meMarker, meCircle;
 function initMap() {
   map = L.map('map', { zoomControl: false, attributionControl: true, center: THUINE, zoom: 14, tap: true });
   L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(map);
   map.attributionControl.setPrefix(false);
   setLayer(state.view.layer, true);
+  flLayer = L.layerGroup().addTo(map);
   sitzLayer = L.layerGroup().addTo(map);
   histLayer = L.layerGroup();
   if (state.view.hist) histLayer.addTo(map);
@@ -440,7 +449,7 @@ function initMap() {
   $('#histBtn').onclick = () => toggleHist();
   $('#fitBtn').onclick = () => fitAll(true);
   $('#locBtn').onclick = () => locate();
-  $('#addBtn').onclick = () => openCapture('neu');
+  $('#addBtn').onclick = () => openAddChoice();
 }
 function makeTiles(key) { const l = LAYERS[key] || LAYERS.luftbild; return L.tileLayer(l.url, l.opt); }
 function setLayer(key, silent) {
@@ -474,8 +483,28 @@ function sitzIcon(s, pending) {
 }
 function renderMap() {
   if (!map) return;
-  sitzLayer.clearLayers(); histLayer.clearLayers();
+  sitzLayer.clearLayers(); histLayer.clearLayers(); flLayer.clearLayers();
   const pend = pendingIds();
+  for (const s of state.data.sitze) {
+    if (s.flaeche) {
+      const pg = L.polygon(s.flaeche.pts, { color: '#e8d24a', weight: 2, fillColor: '#f2e27a', fillOpacity: .22 });
+      pg.bindTooltip(`Freifläche ${esc(s.name)} · ${areaTxt(s.flaeche.m2)}`, { sticky: true });
+      pg.on('click', () => openDetail(s.id));
+      flLayer.addLayer(pg);
+    }
+    if (s.kirrung) {
+      const km = L.marker([s.kirrung.lat, s.kirrung.lng], { icon: kirrIcon(), title: `Kirrung ${s.name}` });
+      km.bindTooltip(`Kirrung · ${esc(s.name)}<br><small>${distTxt(distM(s, s.kirrung))} vom Sitz</small>`, { direction: 'top' });
+      km.on('click', () => openDetail(s.id));
+      flLayer.addLayer(km);
+    }
+  }
+  for (const l of state.data.lecken) {
+    const m = L.marker([l.lat, l.lng], { icon: leckeIcon(pend.has(l.id)), title: l.name });
+    m.bindTooltip(esc(l.name), { permanent: true, direction: 'bottom', className: 'hs-label', offset: [0, 4] });
+    m.on('click', () => openLecke(l.id));
+    sitzLayer.addLayer(m);
+  }
   for (const s of state.data.sitze) {
     const m = L.marker([s.lat, s.lng], { icon: sitzIcon(s, pend.has(s.id)), keyboard: true, title: s.name, riseOnHover: true });
     m.bindTooltip(esc(s.name), { permanent: true, direction: 'bottom', className: 'hs-label', offset: [0, 4] });
@@ -494,7 +523,7 @@ function renderMap() {
   }
 }
 function fitAll(animate) {
-  const pts = state.data.sitze.map(s => [s.lat, s.lng]);
+  const pts = [...state.data.sitze, ...state.data.lecken].map(s => [s.lat, s.lng]);
   if (state.me) pts.push([state.me.lat, state.me.lng]);
   if (!pts.length) { map.setView(THUINE, 14, { animate }); return; }
   if (pts.length === 1) { map.setView(pts[0], 17, { animate }); return; }
@@ -556,6 +585,7 @@ function switchTab(tab, fromPop) {
 }
 function renderList() {
   const el = $('#view-liste');
+  if (state.view.liste === 'lecken') { renderLeckenList(el); return; }
   const sitze = state.data.sitze;
   const pend = pendingIds();
   const q = (state.listQ || '').trim().toLowerCase();
@@ -566,7 +596,7 @@ function renderList() {
   const counts = {};
   sitze.forEach(s => { counts[s.art] = (counts[s.art] || 0) + 1; });
   const mangel = sitze.filter(s => s.zustand !== 'gut').length;
-  el.innerHTML = `
+  el.innerHTML = `${listSeg()}
     <div class="card pad">
       <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px">
         <div><div style="font:600 30px/1 var(--serif);color:var(--green)">${sitze.length}</div><div class="sub">${sitze.length === 1 ? 'Hochsitz' : 'Hochsitze'} im Revier</div></div>
@@ -594,6 +624,7 @@ function renderList() {
     </div>
     ${sort === 'dist' && !state.me && sitze.length ? '<p class="hint" style="text-align:center">Für die Entfernung bitte auf der Karte „Mein Standort“ einschalten.</p>' : ''}
     <p class="hint" style="text-align:center">${state.data.stand ? `Stand: ${dtDE(state.data.stand)} · ` : ''}v${APP_VERSION}</p>`;
+  wireListSeg(el);
   $$('.sitz', el).forEach(b => b.onclick = () => openDetail(b.dataset.id));
   const qi = $('#listQ', el);
   if (qi) qi.oninput = () => { state.listQ = qi.value; const pos = qi.selectionStart; renderList(); const n = $('#listQ'); n.focus(); n.setSelectionRange(pos, pos); };
@@ -604,7 +635,7 @@ function renderList() {
 }
 function renderListDistances() {
   $$('[data-dist]').forEach(el => {
-    const s = sitzById(el.dataset.dist);
+    const s = sitzById(el.dataset.dist) || leckeById(el.dataset.dist);
     el.innerHTML = s && state.me ? `${distTxt(distM(state.me, s))}<small>${dirName(bearing(state.me, s))}</small>` : '';
   });
 }
@@ -625,10 +656,12 @@ function closeSheet(fromPop = false) {
   if ($('#sheet').hidden) return;
   if (sheetCleanup) { const c = sheetCleanup; sheetCleanup = null; c(); }
   $('#sheet').hidden = true;
-  if (!fromPop && history.state?.hs === 'sheet') history.back();
+  if (!fromPop && history.state?.hs === 'sheet') { ignorePop++; history.back(); }
 }
 document.addEventListener('click', e => { if (e.target.closest('[data-close]')) closeSheet(); });
+let ignorePop = 0;
 window.addEventListener('popstate', () => {
+  if (ignorePop > 0) { ignorePop--; return; }
   if (!$('#viewer').hidden) { closeViewer(true); return; }
   if (!$('#sheet').hidden) { closeSheet(true); return; }
   if (state.view.tab !== 'karte') switchTab('karte', true);
@@ -665,7 +698,7 @@ async function openViewer(path, title, pano) {
 function closeViewer(fromPop = false) {
   if ($('#viewer').hidden) return;
   $('#viewer').hidden = true; $('#viewerBody').innerHTML = '';
-  if (!fromPop && history.state?.hs === 'viewer') history.back();
+  if (!fromPop && history.state?.hs === 'viewer') { ignorePop++; history.back(); }
 }
 $('#viewerClose').onclick = () => closeViewer();
 
@@ -697,6 +730,7 @@ function openDetail(id) {
       <button class="btn secondary small" id="detMap">📍 Auf Karte zeigen</button>
       <button class="btn secondary small" id="detCopy">Koordinaten kopieren</button>
     </div>
+    ${flaecheSection(s)}
     ${s.verlauf.length ? `<h2 class="section">Standorte (${s.verlauf.length + 1})</h2>
     <div class="card pad"><ul class="hist">
       <li class="cur"><i></i><div><b>Aktuell</b> · seit ${dateDE(s.seit)}<small>${coordTxt(s)}</small></div></li>
@@ -729,6 +763,7 @@ function openDetail(id) {
     enqueue({ t: 'put', sitzId: s.id, sitzName: s.name, sitz: n, msg: `Alten Standort von „${s.name}“ entfernt` });
     openDetail(s.id);
   });
+  wireFlaecheSection(s);
   $('#detEdit')?.addEventListener('click', () => openCapture('bearbeiten', s.id));
   $('#detMove')?.addEventListener('click', () => openCapture('umstellen', s.id));
   $('#detDel')?.addEventListener('click', e => {
@@ -1056,6 +1091,411 @@ async function startCompass(cb) {
   return () => window.removeEventListener(evt, handler);
 }
 
+/* ================= Salzlecken & Freiflächen (ab 1.1.0) ================= */
+const DAY = 864e5;
+/** Fläche eines kleinen Polygons in m² (lokale Projektion um den Mittelpunkt) */
+function areaM2(pts) {
+  if (!pts || pts.length < 3) return 0;
+  const R = 6371008.8, r = Math.PI / 180;
+  const lat0 = pts.reduce((a, p) => a + p[0], 0) / pts.length * r;
+  const xy = pts.map(p => [p[1] * r * R * Math.cos(lat0), p[0] * r * R]);
+  let a = 0;
+  for (let i = 0; i < xy.length; i++) { const [x1, y1] = xy[i], [x2, y2] = xy[(i + 1) % xy.length]; a += x1 * y2 - x2 * y1; }
+  return Math.abs(a / 2);
+}
+const areaTxt = m2 => m2 >= 10000 ? `${(m2 / 10000).toFixed(2).replace('.', ',')} ha` : `${Math.round(m2).toLocaleString('de-DE')} m²`;
+function daysSince(iso) {
+  if (!iso) return null;
+  const [y, m, d] = iso.split('-').map(Number);
+  const t = new Date(); t.setHours(0, 0, 0, 0);
+  return Math.round((t - new Date(y, m - 1, d)) / DAY);
+}
+const sinceTxt = iso => { const n = daysSince(iso); return n == null ? '' : n <= 0 ? 'heute' : n === 1 ? 'gestern' : `vor ${n} Tagen`; };
+const sortWartung = l => l.wartung.slice().sort((a, b) => (b.datum || '').localeCompare(a.datum || '') || (b.zeit || '').localeCompare(a.zeit || ''));
+const lastOf = (l, art) => sortWartung(l).find(w => !art || w.art === art) || null;
+
+function leckeIcon(pending) {
+  return L.divIcon({ className: 'hs-ico', iconSize: [46, 46], iconAnchor: [23, 23], tooltipAnchor: [0, 16],
+    html: `<div class="hs-wrap"><div class="hs-pin lk${pending ? ' pending' : ''}" style="background:${LECKE.color}">${svgIcon(LECKE.icon)}</div></div>` });
+}
+function kirrIcon() {
+  return L.divIcon({ className: 'hs-ico', iconSize: [30, 30], iconAnchor: [15, 15], tooltipAnchor: [0, -10],
+    html: `<div class="kirr-pin">${svgIcon(KIRR_ICON)}</div>` });
+}
+const svgIcon = (inner, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
+
+/* ---------- Auswahl beim Erfassen ---------- */
+function openAddChoice() {
+  if (!isAdmin()) return;
+  openSheet('Was erfassen?', `
+    <button class="choice" id="chSitz"><span class="ci" style="background:${ARTEN.kanzel.color}">${artIcon('kanzel')}</span><span><b>Hochsitz</b><small>Kanzel, Leiter, Drückjagdbock …</small></span></button>
+    <button class="choice" id="chLecke"><span class="ci" style="background:${LECKE.color}">${svgIcon(LECKE.icon)}</span><span><b>Salzlecke</b><small>mit Wartungsbuch</small></span></button>`);
+  $('#chSitz').onclick = () => openCapture('neu');
+  $('#chLecke').onclick = () => openLeckeCapture('neu');
+}
+
+/* ---------- Liste: Umschalter ---------- */
+function listSeg() {
+  const v = state.view.liste;
+  return `<div class="seg list-seg"><button type="button" data-l="sitze" class="${v !== 'lecken' ? 'on' : ''}">Hochsitze (${state.data.sitze.length})</button><button type="button" data-l="lecken" class="${v === 'lecken' ? 'on' : ''}">Salzlecken (${state.data.lecken.length})</button></div>`;
+}
+function wireListSeg(el) {
+  $$('.list-seg button', el).forEach(b => b.onclick = () => { state.view.liste = b.dataset.l; saveView(); renderList(); });
+}
+function renderLeckenList(el) {
+  const pend = pendingIds();
+  const lk = state.data.lecken;
+  const q = (state.listQ || '').trim().toLowerCase();
+  let rows = lk.filter(l => !q || l.name.toLowerCase().includes(q) || (l.bemerkung || '').toLowerCase().includes(q));
+  const sort = state.view.lsort;
+  const lb = l => lastOf(l, 'bestueckt')?.datum || '';
+  if (sort === 'name') { /* schon nach Name */ }
+  else if (sort === 'dist' && state.me) rows = rows.slice().sort((a, b) => distM(state.me, a) - distM(state.me, b));
+  else rows = rows.slice().sort((a, b) => lb(a).localeCompare(lb(b)) || a.name.localeCompare(b.name, 'de', { numeric: true }));
+  const nie = lk.filter(l => !lastOf(l, 'bestueckt')).length;
+  el.innerHTML = `${listSeg()}
+    <div class="card pad">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px">
+        <div><div style="font:600 30px/1 var(--serif);color:var(--green)">${lk.length}</div><div class="sub">${lk.length === 1 ? 'Salzlecke' : 'Salzlecken'} im Revier</div></div>
+        ${nie ? `<span class="badge maengel">${nie} noch nie bestückt</span>` : ''}
+      </div>
+      ${isAdmin() && lk.length ? '<p class="hint" style="margin-top:8px">Mit ✓ hakst du eine Lecke als bestückt ab. Antippen öffnet das Wartungsbuch.</p>' : ''}
+    </div>
+    ${lk.length ? `<div class="list-tools">
+      <input type="search" id="listQ" placeholder="Suchen …" value="${esc(state.listQ || '')}" aria-label="Suchen">
+      <select id="listSort" aria-label="Sortierung">
+        <option value="alt" ${sort === 'alt' ? 'selected' : ''}>Am längsten her</option>
+        <option value="name" ${sort === 'name' ? 'selected' : ''}>Name</option>
+        <option value="dist" ${sort === 'dist' ? 'selected' : ''}>Entfernung</option>
+      </select>
+    </div>` : ''}
+    <div id="leckList">${rows.map(l => {
+      const b = lastOf(l, 'bestueckt'), w = lastOf(l);
+      return `<div class="lk-row">
+        <button class="sitz" data-lid="${esc(l.id)}">
+          <div class="th" ${l.foto ? `data-img="${esc(l.foto.t)}"` : `style="background:${LECKE.color}"`}>${l.foto ? '' : svgIcon(LECKE.icon)}</div>
+          <div style="min-width:0"><div class="nm">${esc(l.name)}</div>
+            <div class="mt">${b ? `Bestückt ${dateDE(b.datum)} · <b>${sinceTxt(b.datum)}</b>` : '<b style="color:var(--warn)">noch nicht bestückt</b>'}</div>
+            ${w && w !== b ? `<div class="mt">${WARTUNG[w.art] || w.art} ${dateDE(w.datum)}</div>` : ''}
+            ${pend.has(l.id) ? '<div style="margin-top:5px"><span class="badge wait">nicht hochgeladen</span></div>' : ''}
+          </div>
+          <div class="ds" data-dist="${esc(l.id)}"></div>
+        </button>
+        ${isAdmin() ? `<button class="tick${b && daysSince(b.datum) === 0 ? ' done' : ''}" data-tick="${esc(l.id)}" aria-label="Als bestückt abhaken">✓</button>` : ''}
+      </div>`;
+    }).join('') || (lk.length ? '<div class="card pad empty">Nichts gefunden.</div>' : `<div class="card pad empty"><p>Noch keine Salzlecken erfasst.${isAdmin() ? '<br>Auf der Karte „+ Erfassen“ → „Salzlecke“ tippen, wenn du an der Lecke stehst.' : ''}</p></div>`)}</div>
+    <p class="hint" style="text-align:center">v${APP_VERSION}</p>`;
+  wireListSeg(el);
+  $$('[data-lid]', el).forEach(b => b.onclick = () => openLecke(b.dataset.lid));
+  $$('[data-tick]', el).forEach(b => b.onclick = () => openWartung(b.dataset.tick, 'bestueckt'));
+  const qi = $('#listQ', el);
+  if (qi) qi.oninput = () => { state.listQ = qi.value; const pos = qi.selectionStart; renderList(); const n = $('#listQ'); n.focus(); n.setSelectionRange(pos, pos); };
+  const so = $('#listSort', el);
+  if (so) so.onchange = () => { state.view.lsort = so.value; saveView(); if (so.value === 'dist' && !state.me) locate(); renderList(); };
+  renderListDistances();
+  hydrateImages(el);
+}
+
+/* ---------- Salzlecke: Details & Wartungsbuch ---------- */
+function openLecke(id) {
+  const l = leckeById(id); if (!l) return;
+  const pend = pendingIds().has(id);
+  const b = lastOf(l, 'bestueckt');
+  const log = sortWartung(l);
+  openSheet(l.name, `
+    ${l.foto ? `<div class="det-photo"><img data-img="${esc(l.foto.t)}" alt="Foto ${esc(l.name)}" id="lkFoto"></div>` : ''}
+    <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="badge" style="background:${LECKE.color};color:#fff">Salzlecke</span>${pend ? '<span class="badge wait">noch nicht hochgeladen</span>' : ''}</div>
+    <div class="card pad lk-status">${b ? `<div class="sub">Zuletzt bestückt</div><div class="big">${dateDE(b.datum)}</div><div class="sub">${sinceTxt(b.datum)}</div>` : '<div class="big" style="color:var(--warn)">Noch nicht bestückt</div>'}</div>
+    ${l.bemerkung ? `<div class="note">${esc(l.bemerkung)}</div>` : ''}
+    <dl class="facts">
+      ${state.me ? `<dt>Entfernung</dt><dd>${distM(state.me, l) <= Math.max(10, state.me.acc || 0) ? 'Du bist an der Lecke' : `${distTxt(distM(state.me, l))} Richtung ${dirName(bearing(state.me, l))}`}</dd>` : ''}
+      <dt>Koordinaten</dt><dd>${coordTxt(l)}${l.acc ? ` <span class="sub">(±${Math.round(l.acc)} m)</span>` : ''}</dd>
+    </dl>
+    <div class="btn-row"><button class="btn secondary small" id="lkMap">📍 Auf Karte zeigen</button><button class="btn secondary small" id="lkCopy">Koordinaten kopieren</button></div>
+    <h2 class="section">Wartungsbuch</h2>
+    ${log.length ? `<div class="card pad"><ul class="hist">${log.map(w => `<li><i class="w-${esc(w.art)}"></i><div><b>${WARTUNG[w.art] || esc(w.art)}</b> · ${dateDE(w.datum)}${w.notiz ? `<small>${esc(w.notiz)}</small>` : ''}
+      ${isAdmin() ? `<div><button class="btn ghost small" data-wdel="${esc(w.id)}" style="color:var(--warn);min-height:30px;padding:2px 0;margin-top:2px">Entfernen</button></div>` : ''}</div></li>`).join('')}</ul></div>` : '<p class="hint">Noch keine Einträge.</p>'}
+    ${isAdmin() ? `<div class="btn-row"><button class="btn secondary small" id="lkKontr">Kontrolliert</button><button class="btn secondary small" id="lkRep">Repariert</button><button class="btn secondary small" id="lkEdit">Bearbeiten</button></div>
+      <button class="btn danger block" id="lkDel" style="margin-top:18px">Salzlecke löschen</button>` : ''}`,
+    isAdmin() ? `<button class="btn" id="lkBest">✓ Bestückt</button>` : '');
+  const root = $('#sheet');
+  hydrateImages(root);
+  $('#lkFoto')?.addEventListener('click', () => openViewer(l.foto.f, l.name));
+  $('#lkMap').onclick = () => { closeSheet(); focusSitz(l); };
+  $('#lkCopy').onclick = async () => { try { await navigator.clipboard.writeText(coordTxt(l)); toast('Koordinaten kopiert'); } catch { toast(coordTxt(l), 5000); } };
+  $('#lkBest')?.addEventListener('click', () => openWartung(id, 'bestueckt'));
+  $('#lkKontr')?.addEventListener('click', () => openWartung(id, 'kontrolliert'));
+  $('#lkRep')?.addEventListener('click', () => openWartung(id, 'repariert'));
+  $('#lkEdit')?.addEventListener('click', () => openLeckeCapture('bearbeiten', id));
+  $$('[data-wdel]', root).forEach(btn => btn.onclick = () => {
+    if (!btn.dataset.sure) { btn.dataset.sure = 1; btn.textContent = 'Wirklich entfernen?'; return; }
+    const n = clone(l); n.wartung = n.wartung.filter(w => w.id !== btn.dataset.wdel); n.geaendert = new Date().toISOString();
+    enqueue({ t: 'put', coll: 'lecken', sitzId: id, sitzName: l.name, sitz: n, msg: `Wartungseintrag bei „${l.name}“ entfernt` });
+    openLecke(id);
+  });
+  $('#lkDel')?.addEventListener('click', e => {
+    const btn = e.currentTarget;
+    if (!btn.dataset.sure) { btn.dataset.sure = 1; btn.textContent = 'Nochmal tippen zum endgültigen Löschen'; return; }
+    closeSheet();
+    enqueue({ t: 'del', coll: 'lecken', sitzId: id, sitzName: l.name, msg: `Salzlecke „${l.name}“ gelöscht`, delFiles: l.foto ? [l.foto.f, l.foto.t] : [] });
+  });
+}
+/** Wartung eintragen (Standard: heute, Bestückt) */
+function openWartung(id, art = 'bestueckt') {
+  const l = leckeById(id); if (!l || !isAdmin()) return;
+  if (!state.pw) { openPwSheet(() => openWartung(id, art)); return; }
+  let a = art;
+  openSheet(l.name, `
+    <div class="field"><span>Was wurde gemacht?</span><div class="seg" id="wArt">${Object.entries(WARTUNG).map(([k, t]) => `<button type="button" data-v="${k}" class="${k === a ? 'on' : ''}">${t}</button>`).join('')}</div></div>
+    <label class="field"><span>Datum</span><input type="date" id="wDatum" value="${todayISO()}"></label>
+    <label class="field"><span>Notiz (optional)</span><input id="wNotiz" placeholder="z. B. neuer Stein, Pfahl erneuert" autocomplete="off"></label>`,
+    `<button class="btn secondary" data-close>Abbrechen</button><button class="btn" id="wSave">Abhaken</button>`);
+  $$('#wArt button').forEach(b => b.onclick = () => { a = b.dataset.v; $$('#wArt button').forEach(x => x.classList.toggle('on', x === b)); });
+  $('#wSave').onclick = () => {
+    const datum = $('#wDatum').value || todayISO();
+    const n = clone(l);
+    n.wartung.push({ id: uid(), datum, art: a, notiz: $('#wNotiz').value.trim(), zeit: new Date().toISOString() });
+    n.geaendert = new Date().toISOString();
+    closeSheet();
+    enqueue({ t: 'put', coll: 'lecken', sitzId: id, sitzName: l.name, sitz: n, msg: `Salzlecke „${l.name}“: ${WARTUNG[a]} ${dateDE(datum)}` });
+    toast(`✓ ${l.name}: ${WARTUNG[a]}`);
+  };
+}
+
+/* ---------- GPS-Helfer (Salzlecke, Freifläche) ---------- */
+function gpsTracker(onUpd) {
+  const g = { samples: [], est: null, last: null, watch: null };
+  g.start = () => {
+    if (!navigator.geolocation) { onUpd(g, 'Kein GPS – Position in der Karte antippen.'); return; }
+    g.samples = []; g.est = null; g.last = null;
+    if (g.watch != null) navigator.geolocation.clearWatch(g.watch);
+    g.watch = navigator.geolocation.watchPosition(p => {
+      const smp = { lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy, t: Date.now() };
+      g.samples.push(smp); if (g.samples.length > 30) g.samples.shift();
+      g.last = smp; g.est = estimate(g.samples);
+      state.me = { lat: smp.lat, lng: smp.lng, acc: smp.acc };
+      onUpd(g);
+    }, err => onUpd(g, err.code === 1 ? 'Standort nicht erlaubt – bitte freigeben.' : 'Kein GPS-Signal.'), { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 });
+  };
+  /** Mittel der Messungen der letzten Sekunden (beim Gehen) */
+  g.recent = (ms = 8000) => {
+    if (!g.last) return null;
+    const r = g.samples.filter(x => Date.now() - x.t <= ms && distM(x, g.last) <= Math.max(3, Math.min(g.last.acc, 8)));
+    return estimate(r.length ? r : [g.last]);
+  };
+  g.stop = () => { if (g.watch != null) navigator.geolocation.clearWatch(g.watch); g.watch = null; };
+  return g;
+}
+const gpsBoxHtml = `<div class="gps-live"><span class="gps-dot" id="gpsDot"></span><div class="gps-acc" id="gpsAcc">–<small>Genauigkeit</small></div><div class="gps-txt" id="gpsTxt">Starte GPS …</div></div>`;
+function paintGps(e, err, extra = '') {
+  if (!$('#gpsAcc')) return;
+  if (err) { $('#gpsDot').classList.remove('live'); $('#gpsTxt').textContent = err; return; }
+  $('#gpsDot').classList.add('live');
+  const [cls, txt] = gpsQuality(e?.acc);
+  $('#gpsAcc').className = 'gps-acc ' + cls;
+  $('#gpsAcc').innerHTML = `${e ? '±' + Math.round(e.acc) + ' m' : '–'}<small>Genauigkeit</small>`;
+  $('#gpsTxt').innerHTML = `<b>${txt}</b>${extra ? '<br>' + extra : ''}`;
+}
+function makeMini(id, center, zoom = 18) {
+  const m = L.map(id, { zoomControl: false, attributionControl: false, center, zoom });
+  makeTiles(state.view.layer).addTo(m);
+  setTimeout(() => m.invalidateSize(), 250);
+  return m;
+}
+async function storePhoto(ownerId, kind, ph, files) {
+  const base = `${FOTO_DIR}/${ownerId}-${kind}-${uid()}`;
+  const fPath = base + '.bin', tPath = base + '-t.bin';
+  await idbSet('bin:' + fPath, await encryptBytes(ph.full, state.pw));
+  await idbSet('bin:' + tPath, await encryptBytes(ph.thumb, state.pw));
+  imgUrlCache.set(tPath, Promise.resolve(ph.url));
+  files.push(fPath, tPath);
+  return { f: fPath, t: tPath, w: ph.w, h: ph.h };
+}
+
+/* ---------- Salzlecke erfassen / bearbeiten ---------- */
+function openLeckeCapture(mode, id) {
+  if (!isAdmin()) return;
+  if (!state.pw) { openPwSheet(() => openLeckeCapture(mode, id)); return; }
+  const neu = mode === 'neu', l = id ? leckeById(id) : null;
+  const f = { foto: l?.foto || null, newFoto: null };
+  let mini = null, mk = null, circ = null, manual = null;
+  const g = gpsTracker((g, err) => {
+    paintGps(g.est, err, g.est ? `${g.est.n} Messung${g.est.n === 1 ? '' : 'en'} gemittelt` : '');
+    if (g.est && mini && !manual) { mk.setLatLng([g.est.lat, g.est.lng]).addTo(mini); circ.setLatLng([g.est.lat, g.est.lng]).setRadius(g.est.acc); if (!g._c) { g._c = 1; mini.setView([g.est.lat, g.est.lng], 18); } }
+  });
+  openSheet(neu ? 'Neue Salzlecke' : `Bearbeiten: ${l.name}`, `
+    <fieldset><legend>Position</legend>
+      <div class="gps-box" id="gpsBox" ${neu ? '' : 'hidden'}>${gpsBoxHtml}</div>
+      <div class="mini-map" id="lkMini"></div>
+      <p class="hint">${neu ? 'Der Punkt folgt dem GPS. Du kannst ihn auch ziehen oder in die Karte tippen.' : 'Punkt ziehen oder in die Karte tippen, um ihn zu verschieben.'}</p>
+      <div class="btn-row"><button type="button" class="btn secondary small" id="lkGps">${neu ? 'Neu messen' : 'An meine GPS-Position setzen'}</button></div>
+    </fieldset>
+    <fieldset><legend>Angaben</legend>
+      <label class="field"><span>Name / Nummer</span><input id="lkName" value="${esc(l?.name || '')}" placeholder="z. B. Lecke Eichenkanzel oder Nr. 3" autocomplete="off"></label>
+      <label class="field"><span>Bemerkung</span><textarea id="lkBem" placeholder="z. B. am Wildwechsel, Pfahl Eiche">${esc(l?.bemerkung || '')}</textarea></label>
+      ${neu ? '<label class="check"><input type="checkbox" id="lkHeute" checked> Heute bestückt</label>' : ''}
+    </fieldset>
+    <fieldset><legend>Foto</legend><div class="photo-slots"><button type="button" class="slot" id="lkSlot"></button></div></fieldset>`,
+    `<button class="btn secondary" data-close>Abbrechen</button><button class="btn" id="lkSave">Speichern</button>`);
+  const slot = () => {
+    const el = $('#lkSlot');
+    if (f.newFoto) { el.className = 'slot has'; el.innerHTML = `<img src="${f.newFoto.url}" alt=""><span class="lbl">neu</span><span class="x">✕</span>`; }
+    else if (f.foto) { el.className = 'slot has'; el.innerHTML = `<img data-img="${esc(f.foto.t)}" alt=""><span class="x">✕</span>`; hydrateImages(el); }
+    else { el.className = 'slot'; el.innerHTML = `${svgIcon('<path d="M4 8h3l2-2.5h6L17 8h3v11H4Z"/><circle cx="12" cy="13" r="3.5"/>')}Foto<span class="sub" style="font-weight:400">optional</span>`; }
+  };
+  $('#lkSlot').onclick = e => {
+    if (e.target.closest('.x')) { if (f.newFoto) f.newFoto = null; else f.foto = null; slot(); return; }
+    const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*';
+    inp.onchange = async () => { const file = inp.files[0]; if (!file) return; try { const p = await prepPhoto(file, 'foto'); p.url = URL.createObjectURL(new Blob([p.thumb], { type: 'image/jpeg' })); f.newFoto = p; slot(); } catch (err) { toast(err.message, 4000); } };
+    inp.click();
+  };
+  slot();
+  const start = l ? [l.lat, l.lng] : state.me ? [state.me.lat, state.me.lng] : map.getCenter();
+  setTimeout(() => {
+    if (!$('#lkMini')) return;
+    mini = makeMini('lkMini', start);
+    mk = L.marker(start, { draggable: true, icon: leckeIcon(false) });
+    circ = L.circle(start, { radius: 0, color: '#1c6fe0', weight: 1, fillOpacity: .12, interactive: false }).addTo(mini);
+    if (!neu) mk.addTo(mini);
+    mk.on('dragend', () => { const ll = mk.getLatLng(); manual = { lat: ll.lat, lng: ll.lng }; });
+    mini.on('click', e => { manual = { lat: e.latlng.lat, lng: e.latlng.lng }; mk.setLatLng(e.latlng).addTo(mini); });
+    if (g.est) { g._c = 0; paintGps(g.est); mk.setLatLng([g.est.lat, g.est.lng]).addTo(mini); }
+  }, 60);
+  if (neu) g.start();
+  $('#lkGps').onclick = () => { manual = null; $('#gpsBox').hidden = false; g._c = 0; g.start(); };
+  sheetCleanup = () => { g.stop(); if (mini) { mini.remove(); mini = null; } };
+  $('#lkSave').onclick = async () => {
+    const p = manual || g.est || (l ? { lat: l.lat, lng: l.lng, acc: l.acc } : null);
+    if (!p) { toast('Noch keine Position – kurz auf GPS warten oder in die Karte tippen.', 3500); return; }
+    const name = $('#lkName').value.trim();
+    if (!name) { toast('Bitte einen Namen eingeben.'); $('#lkName').focus(); return; }
+    $('#lkSave').disabled = true;
+    try {
+      const lid = l?.id || uid(), files = [], now = new Date().toISOString();
+      const fotoRef = f.newFoto ? await storePhoto(lid, 'lecke', f.newFoto, files) : null;
+      if (f.newFoto) f.newFoto.url = null;
+      const removed = l?.foto && (fotoRef || !f.foto) ? [l.foto.f, l.foto.t] : [];
+      const n = l ? clone(l) : { id: lid, erstellt: now, wartung: [] };
+      Object.assign(n, { name, bemerkung: $('#lkBem').value.trim(), lat: p.lat, lng: p.lng, acc: p.acc ? Math.round(p.acc * 10) / 10 : (l?.acc ?? null), foto: fotoRef || f.foto, geaendert: now });
+      if (neu && $('#lkHeute').checked) n.wartung.push({ id: uid(), datum: todayISO(), art: 'bestueckt', notiz: '', zeit: now });
+      sheetCleanup(); sheetCleanup = null; closeSheet();
+      await enqueue({ t: 'put', coll: 'lecken', sitzId: lid, sitzName: name, sitz: n, files, delFiles: removed, msg: neu ? `Salzlecke „${name}“ erfasst` : `Salzlecke „${name}“ bearbeitet` });
+      if (state.view.tab === 'karte') map.setView([n.lat, n.lng], Math.max(map.getZoom(), 17));
+    } catch (e) { toast('Fehler: ' + e.message, 5000); $('#lkSave').disabled = false; }
+  };
+}
+
+/* ---------- Freifläche & Kirrung (am Hochsitz) ---------- */
+function flaecheSection(s) {
+  const fl = s.flaeche, k = s.kirrung;
+  if (!fl && !k && !isAdmin()) return '';
+  return `<h2 class="section">Freifläche & Kirrung</h2>
+    <div class="card pad">
+      ${fl || k ? `<dl class="facts">
+        ${fl ? `<dt>Freifläche</dt><dd>${areaTxt(fl.m2)} <span class="sub">(${fl.pts.length} Ecken, abgelaufen ${dateDE(fl.datum)})</span></dd>` : ''}
+        ${k ? `<dt>Kirrung</dt><dd>${distTxt(distM(s, k))} vom Sitz, Richtung ${dirName(bearing(s, k))}${k.datum ? ` <span class="sub">(seit ${dateDE(k.datum)})</span>` : ''}</dd>` : ''}
+      </dl>` : '<p class="hint">Noch keine Freifläche eingetragen.</p>'}
+      ${isAdmin() ? `<div class="btn-row" style="margin-top:10px"><button class="btn secondary small" id="flEdit">${fl || k ? 'Freifläche / Kirrung bearbeiten' : 'Freifläche ablaufen'}</button></div>` : ''}
+    </div>`;
+}
+function wireFlaecheSection(s) { $('#flEdit')?.addEventListener('click', () => openFlaeche(s.id)); }
+
+function openFlaeche(id) {
+  const s = sitzById(id); if (!s || !isAdmin()) return;
+  if (!state.pw) { openPwSheet(() => openFlaeche(id)); return; }
+  const pts = (s.flaeche?.pts || []).map(p => [p[0], p[1]]);
+  let kirr = s.kirrung ? { ...s.kirrung } : null;
+  let tapMode = null; // 'kirr' | 'ecke'
+  let mini = null, poly = null, vLayer = null, kMk = null, meMk = null, meC = null;
+  const g = gpsTracker((g, err) => {
+    const r = g.recent();
+    paintGps(r, err, 'Kurz stehen bleiben macht die Ecke genauer');
+    if (r && mini) {
+      if (!meMk) {
+        meMk = L.marker([r.lat, r.lng], { icon: L.divIcon({ className: 'me-dot', iconSize: [24, 24], iconAnchor: [12, 12], html: '<i></i>' }), interactive: false, zIndexOffset: 1000 }).addTo(mini);
+        meC = L.circle([r.lat, r.lng], { radius: r.acc, color: '#1c6fe0', weight: 1, fillOpacity: .1, interactive: false }).addTo(mini);
+      } else { meMk.setLatLng([r.lat, r.lng]); meC.setLatLng([r.lat, r.lng]).setRadius(r.acc); }
+    }
+  });
+  openSheet(`Freifläche: ${s.name}`, `
+    <div class="gps-box">${gpsBoxHtml}</div>
+    <div class="mini-map tall" id="flMini"></div>
+    <div class="fl-info"><span id="flInfo"></span></div>
+    <fieldset><legend>Freifläche ablaufen</legend>
+      <p class="hint">Am Rand der Fläche entlang gehen und an jeder Ecke bzw. Richtungsänderung „Ecke hier setzen“ tippen. Kurz stehen bleiben macht den Punkt genauer. Ecken lassen sich in der Karte nachträglich ziehen.</p>
+      <button type="button" class="btn block" id="flAdd">＋ Ecke hier setzen</button>
+      <div class="btn-row"><button type="button" class="btn secondary small" id="flUndo">Letzte Ecke löschen</button><button type="button" class="btn secondary small" id="flTapE">Ecke in Karte antippen</button><button type="button" class="btn ghost small" id="flClear" style="color:var(--warn)">Fläche leeren</button></div>
+    </fieldset>
+    <fieldset><legend>Kirrung</legend>
+      <div class="btn-row"><button type="button" class="btn secondary small" id="kHere">Kirrung an meiner Position</button><button type="button" class="btn secondary small" id="kTap">Kirrung in Karte antippen</button></div>
+      <button type="button" class="btn ghost small" id="kDel" style="color:var(--warn)">Kirrung entfernen</button>
+    </fieldset>`,
+    `<button class="btn secondary" data-close>Abbrechen</button><button class="btn" id="flSave">Speichern</button>`);
+  const info = () => {
+    const a = areaM2(pts);
+    $('#flInfo').innerHTML = `${pts.length} ${pts.length === 1 ? 'Ecke' : 'Ecken'}${pts.length >= 3 ? ` · <b>${areaTxt(a)}</b>` : pts.length ? ' · mindestens 3 Ecken nötig' : ''} · Kirrung: ${kirr ? `<b>${distTxt(distM(s, kirr))}</b> vom Sitz` : 'keine'}${tapMode ? ` · <b style="color:var(--warn)">${tapMode === 'kirr' ? 'Kirrung' : 'Ecke'}: in die Karte tippen</b>` : ''}`;
+    $('#kDel').hidden = !kirr; $('#flUndo').disabled = !pts.length; $('#flClear').hidden = !pts.length;
+  };
+  const draw = () => {
+    if (!mini) { info(); return; }
+    vLayer.clearLayers();
+    if (poly) { mini.removeLayer(poly); poly = null; }
+    if (pts.length >= 2) poly = (pts.length >= 3 ? L.polygon(pts, { color: '#e8d24a', weight: 2, fillColor: '#f2e27a', fillOpacity: .25 }) : L.polyline(pts, { color: '#e8d24a', weight: 3 })).addTo(mini);
+    pts.forEach((p, i) => {
+      const v = L.marker(p, { draggable: true, icon: L.divIcon({ className: 'fl-v', iconSize: [18, 18], iconAnchor: [9, 9], html: `<i>${i + 1}</i>` }) });
+      v.on('drag', e => { pts[i] = [e.latlng.lat, e.latlng.lng]; if (poly) poly.setLatLngs(pts); });
+      v.on('dragend', () => draw());
+      vLayer.addLayer(v);
+    });
+    if (pts.length && !mini.getBounds().contains(L.latLngBounds(pts))) mini.fitBounds(L.latLngBounds([...pts, [s.lat, s.lng]]).pad(0.2), { maxZoom: 19 });
+    if (kMk) { mini.removeLayer(kMk); kMk = null; }
+    if (kirr) {
+      kMk = L.marker([kirr.lat, kirr.lng], { draggable: true, icon: kirrIcon() }).addTo(mini);
+      kMk.on('dragend', () => { const ll = kMk.getLatLng(); kirr = { ...kirr, lat: ll.lat, lng: ll.lng }; info(); });
+    }
+    info();
+  };
+  setTimeout(() => {
+    if (!$('#flMini')) return;
+    mini = makeMini('flMini', [s.lat, s.lng], 18);
+    vLayer = L.layerGroup().addTo(mini);
+    L.marker([s.lat, s.lng], { icon: sitzIcon(s, false), interactive: false }).addTo(mini);
+    if (pts.length >= 3) mini.fitBounds(L.latLngBounds([...pts, [s.lat, s.lng]]).pad(0.2), { maxZoom: 19 });
+    mini.on('click', e => {
+      if (tapMode === 'kirr') { kirr = { lat: e.latlng.lat, lng: e.latlng.lng, datum: kirr?.datum || todayISO() }; tapMode = null; draw(); }
+      else if (tapMode === 'ecke') { pts.push([e.latlng.lat, e.latlng.lng]); draw(); }
+    });
+    draw();
+  }, 60);
+  g.start();
+  const here = () => { const r = g.recent(); if (!r) toast('Noch kein GPS – kurz warten.', 2500); return r; };
+  $('#flAdd').onclick = () => {
+    const r = here(); if (!r) return;
+    if (pts.length && distM({ lat: pts[pts.length - 1][0], lng: pts[pts.length - 1][1] }, r) < 2) { toast('Zu nah an der letzten Ecke – ein Stück weitergehen.', 2500); return; }
+    pts.push([r.lat, r.lng]); draw();
+    toast(`Ecke ${pts.length} gesetzt (±${Math.round(r.acc)} m)`, 1500);
+    if (navigator.vibrate) navigator.vibrate(40);
+  };
+  $('#flUndo').onclick = () => { pts.pop(); draw(); };
+  $('#flClear').onclick = e => { const b = e.currentTarget; if (!b.dataset.sure) { b.dataset.sure = 1; b.textContent = 'Wirklich alle Ecken löschen?'; return; } delete b.dataset.sure; b.textContent = 'Fläche leeren'; pts.length = 0; draw(); };
+  $('#flTapE').onclick = e => { tapMode = tapMode === 'ecke' ? null : 'ecke'; e.currentTarget.classList.toggle('on-btn', tapMode === 'ecke'); info(); };
+  $('#kHere').onclick = () => { const r = here(); if (!r) return; kirr = { lat: r.lat, lng: r.lng, datum: todayISO() }; draw(); toast('Kirrung gesetzt', 1500); };
+  $('#kTap').onclick = () => { tapMode = 'kirr'; $('#flTapE').classList.remove('on-btn'); info(); };
+  $('#kDel').onclick = () => { kirr = null; draw(); };
+  sheetCleanup = () => { g.stop(); if (mini) { mini.remove(); mini = null; } };
+  $('#flSave').onclick = () => {
+    if (pts.length && pts.length < 3) { toast('Für eine Fläche mindestens 3 Ecken setzen – oder „Fläche leeren“.', 3500); return; }
+    const n = clone(s), now = new Date().toISOString();
+    const changed = JSON.stringify(s.flaeche?.pts || []) !== JSON.stringify(pts);
+    n.flaeche = pts.length >= 3 ? { pts: pts.map(p => [Math.round(p[0] * 1e7) / 1e7, Math.round(p[1] * 1e7) / 1e7]), m2: Math.round(areaM2(pts)), datum: changed ? todayISO() : (s.flaeche?.datum || todayISO()) } : null;
+    n.kirrung = kirr ? { lat: Math.round(kirr.lat * 1e7) / 1e7, lng: Math.round(kirr.lng * 1e7) / 1e7, datum: kirr.datum || todayISO() } : null;
+    n.geaendert = now;
+    sheetCleanup(); sheetCleanup = null; closeSheet();
+    enqueue({ t: 'put', sitzId: s.id, sitzName: s.name, sitz: n, msg: `Freifläche/Kirrung „${s.name}“ gespeichert` });
+    setTimeout(() => openDetail(s.id), 250);
+  };
+}
+
 /* ================= Passwort ================= */
 function showLock(reason) {
   $('#lock').hidden = false;
@@ -1107,7 +1547,8 @@ async function reencryptAll(oldPw, newPw, progress) {
   if (state.queue.length) { await flush(); if (state.queue.length) throw new Error('Erst die wartenden Änderungen hochladen'); }
   const { raw } = await fetchRemoteRaw();
   const { data } = await openRaw(raw);
-  const files = [...new Set(normalize(data).sitze.flatMap(sitzFiles))];
+  const nd = normalize(data);
+  const files = [...new Set([...nd.sitze.flatMap(sitzFiles), ...nd.lecken.flatMap(l => l.foto ? [l.foto.f, l.foto.t] : [])])];
   lsSet(LS_SALT, undefined); // neuer Salt für das neue Passwort
   let i = 0;
   for (const p of files) {

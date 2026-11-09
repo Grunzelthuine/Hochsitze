@@ -12,10 +12,17 @@ Eigenständige Test-App (PWA), die später in die App „Jagd Thuine“ einflie�
 - Liste mit Suche und Sortierung nach Name, Entfernung oder Art.
 - Offline: Änderungen ohne Netz landen in einer Warteschlange und werden automatisch hochgeladen. Angesehene Kartenkacheln und Fotos bleiben auf dem Gerät.
 
+## Neu in v1.1.0
+- **Salzlecken:** „+ Erfassen“ → Salzlecke (GPS, Name, Bemerkung, Foto, „Heute bestückt“). Eigenes Symbol auf der Karte (blaues Quadrat).
+- **Wartungsbuch:** Liste → Reiter „Salzlecken“, sortiert nach „am längsten nicht bestückt“. ✓ hakt als bestückt ab (Datum änderbar, Notiz optional). Dazu „Kontrolliert“ und „Repariert“. Kein Intervall.
+- **Freifläche:** Beim Hochsitz „Freifläche ablaufen“: am Rand entlang gehen und an jeder Ecke „Ecke hier setzen“ tippen. Die Ecken lassen sich ziehen, die Fläche wird in m²/ha berechnet. Gelb auf der Karte.
+- **Kirrung:** Ein Punkt (an der eigenen Position oder in der Karte angetippt) mit Entfernung und Richtung vom Sitz.
+
 ## Daten
 - `data/hochsitze.json`: verschlüsselt (AES-GCM, PBKDF2-SHA256 150.000), gleiches Format wie `strecke.json` in Jagd Thuine.
 - `data/fotos/*.bin`: verschlüsselte JPEGs (Format „SBE1“ wie die Dokumente in Jagd Thuine), jeweils mit Vorschaubild `-t.bin`.
-- Modell: `sitze: [{id, name, art (kanzel|leiter|drueckjagd|erdsitz|sonst), zustand (gut|maengel|gesperrt), bemerkung, lat, lng, acc, richtung (Grad|null), foto {f,t,w,h}, pano {f,t,w,h}, seit, erstellt, geaendert, verlauf: [{lat, lng, acc, richtung, von, bis, foto, pano}]}]`.
+- Modell: `sitze: [{id, name, art (kanzel|leiter|drueckjagd|erdsitz|sonst), zustand (gut|maengel|gesperrt), bemerkung, lat, lng, acc, richtung (Grad|null), foto {f,t,w,h}, pano {f,t,w,h}, seit, erstellt, geaendert, verlauf: [{lat, lng, acc, richtung, von, bis, foto, pano}], flaeche: {pts: [[lat,lng]…], m2, datum} | null, kirrung: {lat, lng, datum} | null}]`.
+- `lecken: [{id, name, bemerkung, lat, lng, acc, foto, erstellt, geaendert, wartung: [{id, datum, art (bestueckt|kontrolliert|repariert), notiz, zeit}]}]`.
 
 ## Zugang
 - Lesen: alle mit dem Passwort der Jagdgemeinschaft.
