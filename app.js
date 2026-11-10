@@ -7,7 +7,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.8.1';
+const APP_VERSION = '1.9.0';
 const LS_CFG = 'hs.cfg.v1';
 const LS_DATA = 'hs.data.v1';
 const LS_PW = 'hs.pw.v1';
@@ -169,7 +169,7 @@ const state = {
   remoteExists: false,
   data: { version: 1, sitze: [] }, // remote + eigene, noch nicht hochgeladene Änderungen
   queue: [],
-  view: Object.assign({ scent: true, windAnim: true, layer: 'luftbild', hist: false, tab: 'karte', sort: 'name', liste: 'sitze', lsort: 'alt' }, lsGet(LS_VIEW, {})),
+  view: Object.assign({ ctlZu: false, scent: true, windAnim: true, layer: 'luftbild', hist: false, tab: 'karte', sort: 'name', liste: 'sitze', lsort: 'alt' }, lsGet(LS_VIEW, {})),
   me: null,              // {lat, lng, acc}
   loaded: false,
 };
@@ -488,6 +488,13 @@ function initMap() {
   };
   $('#histBtn').onclick = () => toggleHist();
   $('#fitBtn').onclick = () => fitAll(true);
+  const ctl = () => {
+    const zu = !!state.view.ctlZu;
+    $('.map-ctl-tr').classList.toggle('collapsed', zu);
+    $('#ctlToggle').setAttribute('aria-expanded', String(!zu));
+  };
+  $('#ctlToggle').onclick = () => { state.view.ctlZu = !state.view.ctlZu; saveView(); ctl(); };
+  ctl();
   $('#windBadge').onclick = () => { openWind(); loadWind(); };
   $('#measureBtn').onclick = () => (meas.on ? stopMeasure() : startMeasure());
   $('#measDone').onclick = () => stopMeasure();

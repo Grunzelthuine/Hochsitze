@@ -338,3 +338,12 @@ legend { font: 600 15px var(--serif); color: var(--green); padding: 0 6px; }
 #northBtn svg { width: 26px; height: 26px; }
 #northBtn.rotated { box-shadow: 0 0 0 2px #c0281a, 0 2px 8px rgba(0,0,0,.18); }
 #northBtn.follow { background: #1c5fbf; border-color: #1c5fbf; color: #fff; box-shadow: 0 0 0 3px rgba(28,95,191,.3), 0 2px 8px rgba(0,0,0,.18); }
+
+/* ---------- 1.9.0: Kartenknöpfe einklappen ---------- */
+.map-ctl-tr .map-btn { transition: opacity .18s, transform .18s; }
+.ctl-toggle { height: 30px; border-radius: 10px; }
+.ctl-toggle svg { width: 20px; height: 20px; transition: transform .2s; }
+.map-ctl-tr.collapsed .ctl-toggle svg { transform: rotate(180deg); }
+.map-ctl-tr.collapsed .map-btn:not(.ctl-toggle) { display: none; }
+/* Nordpfeil bleibt sichtbar, wenn die Karte gedreht ist oder mit dem Kompass dreht */
+.map-ctl-tr.collapsed #northBtn.rotated, .map-ctl-tr.collapsed #northBtn.follow { display: grid; }

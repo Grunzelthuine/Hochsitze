@@ -43,6 +43,9 @@ Eigenständige Test-App (PWA), die später in die App „Jagd Thuine“ einflie�
 ## Neu in v1.8.0
 - **Karte nach Handy-Kompass ausrichten:** Nordpfeil-Knopf antippen, wenn die Karte nach Norden zeigt → Knopf wird blau, die Karte dreht mit dem Handy (oben = Richtung, in die das Handy zeigt). Nochmal tippen = zurück nach Norden. Selbst mit zwei Fingern drehen beendet das Mitdrehen. Ist die Karte gedreht, richtet der erste Tipp sie nach Norden aus.
 
+## Neu in v1.9.0
+- Kartenknöpfe oben rechts lassen sich mit dem Pfeil-Knopf ein- und ausklappen (wird gemerkt). Eingeklappt bleibt der Nordpfeil sichtbar, wenn die Karte gedreht ist oder mit dem Kompass dreht.
+
 ## Daten
 - `data/hochsitze.json`: verschlüsselt (AES-GCM, PBKDF2-SHA256 150.000), gleiches Format wie `strecke.json` in Jagd Thuine.
 - `data/fotos/*.bin`: verschlüsselte JPEGs (Format „SBE1“ wie die Dokumente in Jagd Thuine), jeweils mit Vorschaubild `-t.bin`.
