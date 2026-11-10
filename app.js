@@ -7,7 +7,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.8.0';
+const APP_VERSION = '1.8.1';
 const LS_CFG = 'hs.cfg.v1';
 const LS_DATA = 'hs.data.v1';
 const LS_PW = 'hs.pw.v1';
@@ -432,6 +432,32 @@ async function prepPhoto(file, kind) {
 
 /* ================= Karte ================= */
 let map, baseLayer, sitzLayer, histLayer, flLayer, scentLayer, revLayer, meMarker, meCircle;
+/* Kreise/Flächen beim Zoomen nicht per CSS hochskalieren (driftet mit leaflet-rotate, v. a. iPhone),
+ * sondern bei jedem Zoom-Schritt neu an ihrer Stelle zeichnen; während einer Zoom-Animation kurz ausblenden. */
+(function vektorZoomFix() {
+  const orig = L.Renderer.prototype.getEvents;
+  L.Renderer.include({
+    getEvents() {
+      const ev = orig.call(this);
+      ev.zoom = this._hsZoom; ev.zoomanim = this._hsAnim; ev.zoomend = this._hsZoomEnd;
+      ev.moveend = this._hsMoveEnd; ev.viewreset = this._hsZoomEnd;
+      return ev;
+    },
+    _hsShow() { clearTimeout(this._hsT); if (this._container) this._container.style.visibility = ''; },
+    _hsZoom() { if (this._map && !this._map._animatingZoom) { this._reset(); this._hsShow(); } },
+    _hsAnim() {
+      if (this._container) this._container.style.visibility = 'hidden';
+      clearTimeout(this._hsT); this._hsT = setTimeout(() => this._hsZoomEnd(), 350); // Sicherheitsnetz
+    },
+    _hsZoomEnd() {
+      if (!this._map || this._map._animatingZoom) return;
+      for (const id in this._layers) this._layers[id]._project();
+      this._reset(); this._hsShow();
+    },
+    _hsMoveEnd() { this._update(); if (!this._map._animatingZoom) this._hsShow(); },
+  });
+})();
+
 function initMap() {
   map = L.map('map', { zoomControl: false, attributionControl: true, center: THUINE, zoom: 14, tap: true,
     rotate: true, touchRotate: true, rotateControl: false, bearing: 0, shiftKeyRotate: true });
