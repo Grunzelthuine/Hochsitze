@@ -7,7 +7,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.11.2';
+const APP_VERSION = '1.11.3';
 const LS_CFG = 'hs.cfg.v1';
 const LS_DATA = 'hs.data.v1';
 const LS_PW = 'hs.pw.v1';
@@ -927,7 +927,7 @@ function closeRing(r) { if (r.length > 2) { const a = r[0], b = r[r.length - 1];
 function parseKml(text) {
   const doc = new DOMParser().parseFromString(text, 'application/xml');
   if (doc.querySelector('parsererror')) throw new Error('Datei ist kein gültiges KML.');
-  const out = [];
+  const out = [], lines = [];
   const byTag = (el, tag) => [...el.getElementsByTagNameNS('*', tag)];
   byTag(doc, 'Placemark').forEach(pm => {
     const name = (byTag(pm, 'name')[0]?.textContent || '').trim();
@@ -938,12 +938,43 @@ function parseKml(text) {
       byTag(pg, 'innerBoundaryIs').forEach(ib => { const c = byTag(ib, 'coordinates')[0]; if (c) rings.push(closeRing(parseCoords(c.textContent))); });
       if (rings[0].length >= 3) out.push({ name, poly: rings, typ: 'Fläche' });
     });
+    const folder = pm.parentElement?.localName === 'Folder' ? (byTag(pm.parentElement, 'name')[0]?.textContent || '').trim() : '';
     byTag(pm, 'LineString').forEach(ls => {
       const c = byTag(ls, 'coordinates')[0]; if (!c) return;
-      const r = closeRing(parseCoords(c.textContent));
-      if (r.length >= 3) out.push({ name, poly: [r], typ: 'Linie' });
+      const pts = parseCoords(c.textContent);
+      if (pts.length >= 2) lines.push({ name, folder, pts });
     });
   });
+  const res = out.concat(joinLines(lines));
+  res.docName = (doc.getElementsByTagNameNS('*', 'Document')[0]?.getElementsByTagNameNS('*', 'name')[0]?.textContent || '').trim();
+  return res;
+}
+/** Linienstücke, die an den Enden aneinanderstoßen (≤ 3 m), zu Ringen zusammensetzen.
+ *  So wird eine in Google My Maps aus mehreren Linien gezeichnete Grenze zu einer Fläche. */
+function joinLines(lines) {
+  const near = (a, b) => distM({ lat: a[0], lng: a[1] }, { lat: b[0], lng: b[1] }) <= 3;
+  const pool = lines.map(l => ({ ...l, pts: l.pts.slice() })), out = [];
+  while (pool.length) {
+    const first = pool.shift();
+    let chain = first.pts.slice(); const names = [first.name];
+    for (let found = true; found && !(chain.length > 3 && near(chain[0], chain[chain.length - 1]));) {
+      found = false;
+      for (let i = 0; i < pool.length; i++) {
+        const p = pool[i].pts, end = chain[chain.length - 1], start = chain[0];
+        if (near(end, p[0])) chain = chain.concat(p.slice(1));
+        else if (near(end, p[p.length - 1])) chain = chain.concat(p.slice(0, -1).reverse());
+        else if (near(start, p[p.length - 1])) chain = p.slice(0, -1).concat(chain);
+        else if (near(start, p[0])) chain = p.slice(1).reverse().concat(chain);
+        else continue;
+        names.push(pool[i].name); pool.splice(i, 1); found = true; break;
+      }
+    }
+    const closed = chain.length > 3 && near(chain[0], chain[chain.length - 1]);
+    const ring = closeRing(closed ? chain.slice(0, -1).concat([chain[0]]) : chain);
+    if (ring.length < 3) continue;
+    const name = names.length > 1 ? (first.folder || names.join(' + ')) : first.name;
+    out.push({ name, poly: [ring], typ: names.length > 1 ? `${closed ? 'Fläche' : 'Linie'} aus ${names.length} Linien` : closed ? 'Fläche (geschlossene Linie)' : 'Linie' });
+  }
   return out;
 }
 function parseGeoJson(text) {
@@ -1004,13 +1035,13 @@ function pickRevierFile() {
 function openRevierPreview(items, fname) {
   items.forEach((it, i) => { it.m2 = polyArea(it.poly); it.on = true; it.i = i; });
   // Linien nur vorauswählen, wenn es keine echten Flächen gibt
-  if (items.some(x => x.typ === 'Fläche')) items.forEach(x => { if (x.typ === 'Linie') x.on = false; });
+  if (items.some(x => x.typ.startsWith('Fläche'))) items.forEach(x => { if (!x.typ.startsWith('Fläche')) x.on = false; });
   let mini = null, grp = null;
   openSheet('Reviergrenze importieren', `
     <div class="mini-map tall" id="rvMini"></div>
     <p class="hint">Aus „${esc(fname)}“. Haken bei allem, was zum Revier gehört (mehrere Teilflächen möglich).</p>
     <div class="card pad"><ul class="hist">${items.map(it => `<li><i></i><label class="check" style="align-items:flex-start"><input type="checkbox" data-rv="${it.i}" ${it.on ? 'checked' : ''}><span><b>${esc(it.name || 'ohne Namen')}</b><small>${it.typ} · ${areaTxt(it.m2)} · ${it.poly[0].length} Punkte</small></span></label></li>`).join('')}</ul></div>
-    <label class="field"><span>Name</span><input id="rvName" value="${esc(items.find(x => x.on)?.name || 'Revier Thuine')}" autocomplete="off"></label>
+    <label class="field"><span>Name</span><input id="rvName" value="${esc(items.docName || items.find(x => x.on)?.name || 'Revier Thuine')}" autocomplete="off"></label>
     <p class="hint" id="rvSum"></p>`,
     `<button class="btn secondary" data-close>Abbrechen</button><button class="btn" id="rvSave">Übernehmen</button>`);
   const draw = () => {
