@@ -7,7 +7,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.8.0';
 const LS_CFG = 'hs.cfg.v1';
 const LS_DATA = 'hs.data.v1';
 const LS_PW = 'hs.pw.v1';
@@ -437,7 +437,14 @@ function initMap() {
     rotate: true, touchRotate: true, rotateControl: false, bearing: 0, shiftKeyRotate: true });
   const brg = () => { const b = map.getBearing ? map.getBearing() : 0; $('#view-karte').style.setProperty('--brg', b + 'deg'); $('#northBtn').classList.toggle('rotated', Math.abs(((b + 540) % 360) - 180) > 0.5); };
   map.on('rotate', brg); brg();
-  $('#northBtn').onclick = () => { map.setBearing(0); brg(); };
+  // Nordpfeil: gedreht → Norden; Norden → Kompass folgen; Kompass → Norden
+  $('#northBtn').onclick = async () => {
+    if (follow.stop) { stopFollow(); map.setBearing(0); brg(); toast('Karte nach Norden ausgerichtet', 1400); return; }
+    if (Math.abs(((map.getBearing() + 540) % 360) - 180) > 0.5) { map.setBearing(0); brg(); return; }
+    await startFollow();
+  };
+  // Mit zwei Fingern selbst drehen beendet das Mitdrehen
+  $('#map').addEventListener('touchstart', e => { if (follow.stop && e.touches.length >= 2) { stopFollow(); toast('Kompass-Ausrichtung beendet', 1400); } }, { passive: true });
   L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(map);
   map.attributionControl.setPrefix(false);
   setLayer(state.view.layer, true);
@@ -1494,6 +1501,34 @@ function openCapture(mode, id) {
       $('#capSave').disabled = false;
     }
   };
+}
+
+
+/* ---------- Karte nach Handy-Kompass ausrichten (ab 1.8.0) ---------- */
+const follow = { stop: null, want: null, raf: 0 };
+async function startFollow() {
+  const btn = $('#northBtn');
+  const stop = await startCompass(h => {
+    follow.want = h;
+    if (!follow.raf) follow.raf = requestAnimationFrame(() => {
+      follow.raf = 0;
+      if (!follow.stop || follow.want == null) return;
+      const target = -follow.want;                        // Blickrichtung des Handys nach oben
+      const cur = map.getBearing();
+      const d = ((target - cur) % 360 + 540) % 360 - 180;
+      if (Math.abs(d) >= 1) map.setBearing(cur + d);
+    });
+  });
+  if (!stop) return;
+  follow.stop = stop;
+  btn.classList.add('follow');
+  setTimeout(() => { if (follow.stop && follow.want == null) stopFollow(); }, 3500);
+  toast('Karte dreht mit dem Handy – Handy flach halten. Nochmal tippen = Norden.', 3200);
+}
+function stopFollow() {
+  if (follow.stop) { follow.stop(); follow.stop = null; }
+  if (follow.raf) { cancelAnimationFrame(follow.raf); follow.raf = 0; }
+  $('#northBtn').classList.remove('follow');
 }
 
 /* ---------- Kompass ---------- */

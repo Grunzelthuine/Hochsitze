@@ -337,3 +337,4 @@ legend { font: 600 15px var(--serif); color: var(--green); padding: 0 6px; }
 .wrot { transform: rotate(calc(var(--r, 0deg) + var(--brg, 0deg))); transition: transform .15s linear; }
 #northBtn svg { width: 26px; height: 26px; }
 #northBtn.rotated { box-shadow: 0 0 0 2px #c0281a, 0 2px 8px rgba(0,0,0,.18); }
+#northBtn.follow { background: #1c5fbf; border-color: #1c5fbf; color: #fff; box-shadow: 0 0 0 3px rgba(28,95,191,.3), 0 2px 8px rgba(0,0,0,.18); }
