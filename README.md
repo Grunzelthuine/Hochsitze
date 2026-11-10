@@ -28,6 +28,10 @@ Eigenständige Test-App (PWA), die später in die App „Jagd Thuine“ einflie�
 ## Neu in v1.4.0
 - **Windanimation** über der Karte: feine weiße Linien ziehen in Windrichtung, Tempo nach Windstärke, leichte Böen-Schübe. Knopf mit Windsymbol rechts schaltet sie ein/aus (wird gemerkt). Läuft nur, wenn die Karte sichtbar ist (pausiert bei offenen Fenstern, auf der Liste und im Hintergrund).
 
+## Neu in v1.5.0
+- **Witterungsfahnen:** An jedem Hochsitz zeigt ein oranger Kegel, wohin die Witterung zieht (Richtung = Wind, Länge 80–350 m und Öffnung 12–40° je nach Windstärke; unter 4 km/h gestrichelter Kreis „kann umlaufen“). Ein/aus im Wind-Fenster (Wind-Kachel antippen).
+- Liegen Kirrung oder Freifläche in der Fahne, zeigen Hochsitz-Detail und Wind-Fenster „⚠ Witterung zieht über die Kirrung/Freifläche“.
+
 ## Daten
 - `data/hochsitze.json`: verschlüsselt (AES-GCM, PBKDF2-SHA256 150.000), gleiches Format wie `strecke.json` in Jagd Thuine.
 - `data/fotos/*.bin`: verschlüsselte JPEGs (Format „SBE1“ wie die Dokumente in Jagd Thuine), jeweils mit Vorschaubild `-t.bin`.

@@ -7,7 +7,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 const LS_CFG = 'hs.cfg.v1';
 const LS_DATA = 'hs.data.v1';
 const LS_PW = 'hs.pw.v1';
@@ -169,7 +169,7 @@ const state = {
   remoteExists: false,
   data: { version: 1, sitze: [] }, // remote + eigene, noch nicht hochgeladene Änderungen
   queue: [],
-  view: Object.assign({ windAnim: true, layer: 'luftbild', hist: false, tab: 'karte', sort: 'name', liste: 'sitze', lsort: 'alt' }, lsGet(LS_VIEW, {})),
+  view: Object.assign({ scent: true, windAnim: true, layer: 'luftbild', hist: false, tab: 'karte', sort: 'name', liste: 'sitze', lsort: 'alt' }, lsGet(LS_VIEW, {})),
   me: null,              // {lat, lng, acc}
   loaded: false,
 };
@@ -430,12 +430,13 @@ async function prepPhoto(file, kind) {
 }
 
 /* ================= Karte ================= */
-let map, baseLayer, sitzLayer, histLayer, flLayer, meMarker, meCircle;
+let map, baseLayer, sitzLayer, histLayer, flLayer, scentLayer, meMarker, meCircle;
 function initMap() {
   map = L.map('map', { zoomControl: false, attributionControl: true, center: THUINE, zoom: 14, tap: true });
   L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(map);
   map.attributionControl.setPrefix(false);
   setLayer(state.view.layer, true);
+  scentLayer = L.layerGroup().addTo(map);
   flLayer = L.layerGroup().addTo(map);
   sitzLayer = L.layerGroup().addTo(map);
   histLayer = L.layerGroup();
@@ -491,6 +492,7 @@ function renderMap() {
   if (!map) return;
   sitzLayer.clearLayers(); histLayer.clearLayers(); flLayer.clearLayers();
   if (meas.on) drawMeasure();
+  drawScent();
   const pend = pendingIds();
   for (const s of state.data.sitze) {
     if (s.flaeche) {
@@ -692,6 +694,7 @@ const zeitHM = iso => iso ? new Date(iso).toLocaleTimeString('de-DE', { hour: '2
 function windAlt(c) { if (!c?.abruf) return ''; const min = (Date.now() - new Date(c.zeit || c.abruf).getTime()) / 60000; return min > 90 ? ' (älter)' : ''; }
 function renderWind() {
   flowCheck();
+  drawScent();
   const b = $('#windBadge'); if (!b) return;
   const c = wind.cur;
   b.classList.toggle('busy', wind.loading);
@@ -703,12 +706,13 @@ function windFuerSitz(s) {
   const c = wind.cur;
   if (!c || c.dir == null || c.speed == null) return '';
   const base = `aus ${dirName(c.dir)} (${Math.round(c.dir)}°), ${Math.round(c.speed)} km/h`;
-  if (s.richtung == null) return base;
+  const warn = scentWarn(s), w = warn ? `<br><b style="color:var(--warn)">⚠ ${warn}</b>` : '';
   if (c.speed < 4) return `${base} – kaum Wind, kann umlaufen`;
+  if (s.richtung == null) return base + w;
   const d = angDiff(c.dir, s.richtung);
-  if (d <= 60) return `${base} – <b style="color:var(--green)">von vorn, günstig</b>`;
-  if (d >= 120) return `${base} – <b style="color:var(--warn)">im Rücken, ungünstig</b>`;
-  return `${base} – <b style="color:var(--brass)">Seitenwind</b>`;
+  if (d <= 60) return `${base} – <b style="color:var(--green)">von vorn, günstig</b>${w}`;
+  if (d >= 120) return `${base} – <b style="color:var(--warn)">im Rücken, ungünstig</b>${w}`;
+  return `${base} – <b style="color:var(--brass)">Seitenwind</b>${w}`;
 }
 function openWind() {
   const c = wind.cur;
@@ -719,12 +723,68 @@ function openWind() {
       <div class="sub">${c.speed != null ? `Stärke ${bft(c.speed)} Bft · ` : ''}Stand ${zeitHM(c.zeit)}${windAlt(c)}</div></div></div>
     <p class="hint">Quelle: ${esc(c.quelle)}${c.station ? `, Station ${esc(c.station)}${c.dist ? ` (${distTxt(c.dist)} entfernt)` : ''}` : ''}. Der Pfeil zeigt, wohin der Wind weht.</p>
     ${wind.fc?.length ? `<h2 class="section">Nächste Stunden</h2><div class="card"><ul class="wind-fc">${wind.fc.map(f => `<li><span class="t">${zeitHM(f.zeit)}</span><span class="a">${windArrow(f.dir, 18)}</span><span class="d">aus ${f.dir == null ? '–' : dirName(f.dir)}</span><span class="v">${f.speed == null ? '–' : Math.round(f.speed)} km/h</span><span class="g">${f.gust != null ? `Böen ${Math.round(f.gust)}` : ''}</span></li>`).join('')}</ul></div><p class="hint">Vorhersage: ${esc(wind.fcQuelle || '')}</p>` : ''}
-    ${state.data.sitze.some(s => s.richtung != null) ? `<h2 class="section">Wind an den Sitzen (jetzt)</h2><div class="card pad"><ul class="hist">${state.data.sitze.filter(s => s.richtung != null).map(s => `<li><i></i><div><b>${esc(s.name)}</b> · Blick ${dirName(s.richtung)}<small>${windFuerSitz(s)}</small></div></li>`).join('')}</ul></div>` : ''}`
+    <div class="card pad"><label class="check"><input type="checkbox" id="scentChk" ${state.view.scent ? 'checked' : ''}> Witterungsfahnen an den Hochsitzen zeigen</label>
+      <p class="hint" style="margin-top:6px">Der orange Kegel zeigt, wohin die Witterung vom Sitz zieht. Länge und Breite richten sich nach der Windstärke, bei Windstille (unter 4 km/h) ein Kreis: Wind kann umlaufen. Nur ein Anhalt – am Boden lenken Wald, Hecken und Senken den Wind um.</p></div>
+    ${state.data.sitze.some(s => s.richtung != null || scentWarn(s)) ? `<h2 class="section">Wind an den Sitzen (jetzt)</h2><div class="card pad"><ul class="hist">${state.data.sitze.filter(s => s.richtung != null || scentWarn(s)).map(s => `<li><i></i><div><b>${esc(s.name)}</b>${s.richtung != null ? ` · Blick ${dirName(s.richtung)}` : ''}<small>${windFuerSitz(s)}</small></div></li>`).join('')}</ul></div>` : ''}`
     : '<p class="hint">Noch keine Winddaten – bitte Internetverbindung prüfen.</p>';
   openSheet('Wind', body, `<button class="btn secondary" id="windReload">Aktualisieren</button>`);
   $('#windReload').onclick = async () => { await loadWind(true); openWind(); };
+  $('#scentChk')?.addEventListener('change', e => { state.view.scent = e.target.checked; saveView(); drawScent(); });
 }
 
+
+
+/* ---------- Witterungsfahne je Hochsitz (ab 1.5.0) ---------- */
+function destPoint(p, brg, m) {
+  const R = 6371008.8, r = Math.PI / 180, d = m / R, b = brg * r, la = p.lat * r, lo = p.lng * r;
+  const la2 = Math.asin(Math.sin(la) * Math.cos(d) + Math.cos(la) * Math.sin(d) * Math.cos(b));
+  const lo2 = lo + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(la), Math.cos(d) - Math.sin(la) * Math.sin(la2));
+  return { lat: la2 / r, lng: lo2 / r };
+}
+/** Form der Fahne aus dem aktuellen Wind: Richtung, Länge (m), halber Öffnungswinkel (°) */
+function scentShape() {
+  const c = wind.cur;
+  if (!c || c.dir == null || c.speed == null) return null;
+  if (c.speed < 4) return { calm: true, len: 60 };
+  return { to: (c.dir + 180) % 360, len: Math.min(350, 80 + c.speed * 12), half: Math.max(12, Math.min(40, 40 - c.speed * 1.2)) };
+}
+function scentPoly(s, sh, f) {
+  const pts = [[s.lat, s.lng]];
+  for (let a = -sh.half; a <= sh.half + 0.01; a += 4) { const q = destPoint(s, sh.to + a, sh.len * f); pts.push([q.lat, q.lng]); }
+  return pts;
+}
+/** Liegt ein Punkt in der Witterungsfahne des Sitzes? */
+function inScent(s, p, sh = scentShape()) {
+  if (!sh || sh.calm) return false;
+  const d = distM(s, p);
+  return d > 3 && d <= sh.len && angDiff(bearing(s, p), sh.to) <= sh.half;
+}
+function scentWarn(s) {
+  const sh = scentShape(); if (!sh || sh.calm) return '';
+  const hits = [];
+  if (s.kirrung && inScent(s, s.kirrung, sh)) hits.push('die Kirrung');
+  if (s.flaeche) {
+    const n = s.flaeche.pts.length, c = { lat: s.flaeche.pts.reduce((a, p) => a + p[0], 0) / n, lng: s.flaeche.pts.reduce((a, p) => a + p[1], 0) / n };
+    const share = s.flaeche.pts.filter(p => inScent(s, { lat: p[0], lng: p[1] }, sh)).length / n;
+    if (inScent(s, c, sh) || share >= 0.5) hits.push('die Freifläche');
+  }
+  return hits.length ? `Witterung zieht über ${hits.join(' und ')}` : '';
+}
+function drawScent() {
+  if (!scentLayer) return;
+  scentLayer.clearLayers();
+  const sh = scentShape();
+  if (!state.view.scent || !sh) return;
+  for (const s of state.data.sitze) {
+    if (sh.calm) {
+      scentLayer.addLayer(L.circle([s.lat, s.lng], { radius: sh.len, color: '#e2572b', weight: 1.5, dashArray: '4 6', fillColor: '#ff7a45', fillOpacity: .12, interactive: false }));
+      continue;
+    }
+    [[1, .10], [0.66, .12], [0.33, .16]].forEach(([f, op], i) => {
+      scentLayer.addLayer(L.polygon(scentPoly(s, sh, f), { stroke: i === 0, color: '#e2572b', weight: 1, opacity: .55, dashArray: '3 5', fillColor: '#ff7a45', fillOpacity: op, interactive: false }));
+    });
+  }
+}
 
 /* ---------- Wind-Animation über der Karte (ab 1.4.0) ---------- */
 const flow = { cv: null, ctx: null, parts: [], raf: 0, w: 0, h: 0, dpr: 1, last: 0 };
