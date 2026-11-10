@@ -7,7 +7,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.11.1';
+const APP_VERSION = '1.11.2';
 const LS_CFG = 'hs.cfg.v1';
 const LS_DATA = 'hs.data.v1';
 const LS_PW = 'hs.pw.v1';
@@ -981,13 +981,20 @@ async function unzipKml(buf) {
   throw new Error('In der KMZ-Datei wurde keine KML gefunden.');
 }
 function pickRevierFile() {
-  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.kml,.kmz,.geojson,.json,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz';
+  // Kein accept-Filter: iOS kennt .kml/.kmz nicht und graut die Dateien sonst aus. Inhalt wird nach der Auswahl geprüft.
+  const inp = document.createElement('input'); inp.type = 'file';
   inp.onchange = async () => {
     const f = inp.files[0]; if (!f) return;
     try {
       let items;
-      if (/\.kmz$/i.test(f.name)) items = parseKml(await unzipKml(await f.arrayBuffer()));
-      else { const t = await f.text(); items = /^\s*[{[]/.test(t) ? parseGeoJson(t) : parseKml(t); }
+      const buf = await f.arrayBuffer(), head = new Uint8Array(buf.slice(0, 4));
+      if (head[0] === 0x50 && head[1] === 0x4b) items = parseKml(await unzipKml(buf)); // ZIP = KMZ (auch ohne passende Endung)
+      else {
+        const t = new TextDecoder().decode(buf);
+        if (/^\s*[{[]/.test(t)) items = parseGeoJson(t);
+        else if (/<kml[\s>]/i.test(t)) items = parseKml(t);
+        else throw new Error('Das ist keine KML-, KMZ- oder GeoJSON-Datei. Bitte in Google My Maps „In KML/KMZ exportieren“ nehmen.');
+      }
       if (!items.length) throw new Error('Keine Fläche oder Linie in der Datei gefunden.');
       openRevierPreview(items, f.name);
     } catch (e) { toast(e.message, 5000); }
