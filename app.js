@@ -7,7 +7,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.11.3';
+const APP_VERSION = '1.11.4';
 const LS_CFG = 'hs.cfg.v1';
 const LS_DATA = 'hs.data.v1';
 const LS_PW = 'hs.pw.v1';
@@ -2366,9 +2366,23 @@ $$('.tab').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
 function measureTop() { document.documentElement.style.setProperty('--top-h', $('.topbar').getBoundingClientRect().height + 'px'); }
 window.addEventListener('resize', () => { measureTop(); map?.invalidateSize(); });
 window.addEventListener('online', () => flush());
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && Date.now() - (load._last || 0) > 60000 && $('#sheet').hidden) { load._last = Date.now(); load({ quiet: true }); }
-});
+/** Uhrzeit-abhängige Anzeigen (Sonnen-Kachel) sofort und dann immer zur vollen Minute neu zeichnen.
+ *  Zeitgeber laufen im Hintergrund (v. a. iPhone) nicht weiter – deshalb auch beim Zurückkommen in die App. */
+let minuteT = 0;
+function tickMinute() {
+  clearTimeout(minuteT);
+  renderSun();
+  minuteT = setTimeout(tickMinute, 60000 - (Date.now() % 60000) + 50);
+}
+function onBackInApp() {
+  if (document.visibilityState !== 'visible') return;
+  tickMinute();
+  loadWind();
+  if (Date.now() - (load._last || 0) > 60000 && $('#sheet').hidden) { load._last = Date.now(); load({ quiet: true }); }
+}
+document.addEventListener('visibilitychange', onBackInApp);
+window.addEventListener('pageshow', onBackInApp);
+window.addEventListener('focus', onBackInApp);
 setInterval(() => { if (document.visibilityState === 'visible' && $('#sheet').hidden && $('#viewer').hidden) load({ quiet: true }); }, 5 * 60 * 1000);
 
 (async function start() {
@@ -2378,11 +2392,11 @@ setInterval(() => { if (document.visibilityState === 'visible' && $('#sheet').hi
   switchTab(state.view.tab === 'liste' ? 'liste' : 'karte', true);
   await loadCached();
   renderWind();
-  renderSun();
+  tickMinute();
+  setInterval(() => { if (document.visibilityState === 'visible') loadWind(); }, 60 * 1000);
+  loadWind(true);
   load._last = Date.now();
   await load();
-  loadWind(true);
-  setInterval(() => { if (document.visibilityState === 'visible') { loadWind(); renderSun(); } }, 60 * 1000);
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
     navigator.serviceWorker.register('sw.js').then(reg => {
       reg.addEventListener('updatefound', () => {
