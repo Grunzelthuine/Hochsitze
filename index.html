@@ -15,7 +15,7 @@
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
 <link rel="stylesheet" href="vendor/leaflet.css?v=1.9.4">
-<link rel="stylesheet" href="style.css?v=1.6.0">
+<link rel="stylesheet" href="style.css?v=1.7.0">
 </head>
 <body>
 <header class="topbar">
@@ -39,6 +39,9 @@
     <div id="map" class="map" aria-label="Karte der Hochsitze"></div>
     <button class="wind-badge" id="windBadge" aria-label="Wind"></button>
     <div class="map-ctl map-ctl-tr">
+      <button class="map-btn" id="northBtn" aria-label="Karte nach Norden ausrichten" title="Nach Norden">
+        <svg viewBox="0 0 24 24" class="wrot" style="--r:0deg" aria-hidden="true"><path d="M12 2.5 16 12h-8Z" fill="#c0281a"/><path d="M12 21.5 8 12h8Z" fill="currentColor" opacity=".55"/><text x="12" y="10.3" font-size="5.2" font-weight="700" text-anchor="middle" fill="#fff" font-family="sans-serif">N</text></svg>
+      </button>
       <button class="map-btn" id="layerBtn" aria-label="Kartenart wechseln" title="Kartenart">
         <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="m12 3 9 5-9 5-9-5Z"/><path d="m3 13 9 5 9-5"/></svg>
       </button>
@@ -118,6 +121,7 @@
 <div id="toast" class="toast" hidden></div>
 
 <script src="vendor/leaflet.js?v=1.9.4"></script>
-<script src="app.js?v=1.6.0"></script>
+<script src="vendor/leaflet-rotate.js?v=0.2.8"></script>
+<script src="app.js?v=1.7.0"></script>
 </body>
 </html>

@@ -2,12 +2,12 @@
  * Bei jeder Änderung an App-Dateien VERSION erhöhen → Hinweis „Neue Version“.
  * Kartenkacheln werden beim Ansehen zwischengespeichert (offline im Revier nutzbar).
  */
-const VERSION = 'hs-1.6.0';
+const VERSION = 'hs-1.7.0';
 const TILES = 'hs-tiles-v1';
 const TILE_MAX = 3000;
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest',
   'icons/logo.png', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png',
-  'vendor/leaflet.js', 'vendor/leaflet.css'];
+  'vendor/leaflet.js', 'vendor/leaflet.css', 'vendor/leaflet-rotate.js'];
 const TILE_HOSTS = ['server.arcgisonline.com', 'tile.openstreetmap.org', 'sgx.geodatenzentrum.de'];
 
 self.addEventListener('install', e => {

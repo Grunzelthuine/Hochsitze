@@ -331,3 +331,9 @@ legend { font: 600 15px var(--serif); color: var(--green); padding: 0 6px; }
 
 /* ---------- 1.4.0: Wind-Animation ---------- */
 .wind-canvas { position: absolute; left: 0; top: 0; z-index: 450; pointer-events: none; }
+
+/* ---------- 1.7.0: Karte drehen ---------- */
+.hs-cone { transform: rotate(calc(var(--r, 0deg) + var(--brg, 0deg))); }
+.wrot { transform: rotate(calc(var(--r, 0deg) + var(--brg, 0deg))); transition: transform .15s linear; }
+#northBtn svg { width: 26px; height: 26px; }
+#northBtn.rotated { box-shadow: 0 0 0 2px #c0281a, 0 2px 8px rgba(0,0,0,.18); }

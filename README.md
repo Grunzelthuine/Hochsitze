@@ -35,6 +35,11 @@ Eigenständige Test-App (PWA), die später in die App „Jagd Thuine“ einflie�
 ## Neu in v1.6.0
 - **Reviergrenze:** Einstellungen → „Reviergrenze importieren“ (nur voller Zugang). Liest KML/KMZ (z. B. Export aus Google My Maps) und GeoJSON, zeigt eine Vorschau mit allen Flächen/Linien zum Anhaken und die Größe in ha. Die Grenze erscheint orange auf der Karte, „Alle zeigen“ und der Wind-Ort richten sich danach. Gespeichert verschlüsselt als `revier` {name, polys, m2, quelle, datum}.
 
+## Neu in v1.7.0
+- **Karte drehen** mit zwei Fingern (Erweiterung [leaflet-rotate](https://github.com/Raruto/leaflet-rotate) 0.2.8, MIT, angepasst: Drehen erst ab 12° Fingerdrehung, damit beim Zoomen nichts verdreht). Am PC: Umschalt + Mausrad.
+- Kompass-Knopf oben rechts: roter Pfeil zeigt nach Norden, roter Rand = Karte ist gedreht, Antippen = wieder nach Norden.
+- Blickrichtungs-Kegel, Windlinien, Windpfeil und Nordpfeil drehen mit; Entfernungen/Richtungen beim Messen bleiben echte Kompassrichtungen.
+
 ## Daten
 - `data/hochsitze.json`: verschlüsselt (AES-GCM, PBKDF2-SHA256 150.000), gleiches Format wie `strecke.json` in Jagd Thuine.
 - `data/fotos/*.bin`: verschlüsselte JPEGs (Format „SBE1“ wie die Dokumente in Jagd Thuine), jeweils mit Vorschaubild `-t.bin`.

@@ -7,7 +7,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.7.0';
 const LS_CFG = 'hs.cfg.v1';
 const LS_DATA = 'hs.data.v1';
 const LS_PW = 'hs.pw.v1';
@@ -433,7 +433,11 @@ async function prepPhoto(file, kind) {
 /* ================= Karte ================= */
 let map, baseLayer, sitzLayer, histLayer, flLayer, scentLayer, revLayer, meMarker, meCircle;
 function initMap() {
-  map = L.map('map', { zoomControl: false, attributionControl: true, center: THUINE, zoom: 14, tap: true });
+  map = L.map('map', { zoomControl: false, attributionControl: true, center: THUINE, zoom: 14, tap: true,
+    rotate: true, touchRotate: true, rotateControl: false, bearing: 0, shiftKeyRotate: true });
+  const brg = () => { const b = map.getBearing ? map.getBearing() : 0; $('#view-karte').style.setProperty('--brg', b + 'deg'); $('#northBtn').classList.toggle('rotated', Math.abs(((b + 540) % 360) - 180) > 0.5); };
+  map.on('rotate', brg); brg();
+  $('#northBtn').onclick = () => { map.setBearing(0); brg(); };
   L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(map);
   map.attributionControl.setPrefix(false);
   setLayer(state.view.layer, true);
@@ -480,7 +484,7 @@ function toggleHist(on = !state.view.hist) {
 }
 function coneSvg(deg) {
   if (deg == null) return '';
-  return `<svg class="hs-cone" viewBox="0 0 46 46" style="transform:rotate(${Math.round(deg)}deg)" aria-hidden="true"><path d="M23 23 L12 3.95 A22 22 0 0 1 34 3.95 Z" fill="rgba(255,214,90,.55)" stroke="rgba(120,90,10,.8)" stroke-width="1"/></svg>`;
+  return `<svg class="hs-cone" viewBox="0 0 46 46" style="--r:${Math.round(deg)}deg" aria-hidden="true"><path d="M23 23 L12 3.95 A22 22 0 0 1 34 3.95 Z" fill="rgba(255,214,90,.55)" stroke="rgba(120,90,10,.8)" stroke-width="1"/></svg>`;
 }
 function sitzIcon(s, pending) {
   const a = artOf(s);
@@ -695,7 +699,7 @@ async function loadWind(force = false) {
   } catch { /* offline – letzter Stand bleibt */ }
   finally { wind.loading = false; renderWind(); }
 }
-const windArrow = (dir, size = 26) => dir == null ? '' : `<svg viewBox="0 0 24 24" width="${size}" height="${size}" style="transform:rotate(${Math.round(dir + 180)}deg)" aria-hidden="true"><path d="M12 2 18.5 20 12 16 5.5 20Z" fill="currentColor"/></svg>`;
+const windArrow = (dir, size = 26) => dir == null ? '' : `<svg viewBox="0 0 24 24" width="${size}" height="${size}" class="wrot" style="--r:${Math.round(dir + 180)}deg" aria-hidden="true"><path d="M12 2 18.5 20 12 16 5.5 20Z" fill="currentColor"/></svg>`;
 const zeitHM = iso => iso ? new Date(iso).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '–';
 function windAlt(c) { if (!c?.abruf) return ''; const min = (Date.now() - new Date(c.zeit || c.abruf).getTime()) / 60000; return min > 90 ? ' (älter)' : ''; }
 function renderWind() {
@@ -800,7 +804,7 @@ function flowInit() {
   $('#map').after(cv);
   flow.cv = cv; flow.ctx = cv.getContext('2d');
   const clear = () => flow.ctx && flow.ctx.clearRect(0, 0, flow.w, flow.h);
-  map.on('movestart zoomstart', clear);
+  map.on('movestart zoomstart rotate', clear);
   window.addEventListener('resize', flowSize);
   document.addEventListener('visibilitychange', flowCheck);
   $('#windAnimBtn').onclick = () => { state.view.windAnim = !state.view.windAnim; saveView(); flowCheck(); toast(state.view.windAnim ? 'Windanimation an' : 'Windanimation aus', 1400); };
@@ -836,7 +840,7 @@ function flowStep(t) {
   if (!flowActive()) { flow.ctx.clearRect(0, 0, flow.w, flow.h); return; }
   const dt = flow.last ? Math.min(50, t - flow.last) / 16.7 : 1; flow.last = t;
   const c = wind.cur, ctx = flow.ctx;
-  const to = (c.dir + 180) * Math.PI / 180;                 // Richtung, in die der Wind weht
+  const to = (c.dir + 180 + (map.getBearing ? map.getBearing() : 0)) * Math.PI / 180; // Richtung, in die der Wind weht (Bildschirm, Karte evtl. gedreht)
   const v = Math.min(5, 0.35 + c.speed * 0.09);              // px pro Frame, nach Windstärke
   const gust = c.gust && c.speed ? Math.min(1.6, c.gust / Math.max(c.speed, 1)) : 1;
   const wob = Math.sin(t / 900) * 0.06 + Math.sin(t / 2300) * 0.04; // leichtes Pendeln der Richtung
