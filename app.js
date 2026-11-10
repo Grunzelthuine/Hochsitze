@@ -7,7 +7,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.4.0';
 const LS_CFG = 'hs.cfg.v1';
 const LS_DATA = 'hs.data.v1';
 const LS_PW = 'hs.pw.v1';
@@ -169,7 +169,7 @@ const state = {
   remoteExists: false,
   data: { version: 1, sitze: [] }, // remote + eigene, noch nicht hochgeladene Änderungen
   queue: [],
-  view: Object.assign({ layer: 'luftbild', hist: false, tab: 'karte', sort: 'name', liste: 'sitze', lsort: 'alt' }, lsGet(LS_VIEW, {})),
+  view: Object.assign({ windAnim: true, layer: 'luftbild', hist: false, tab: 'karte', sort: 'name', liste: 'sitze', lsort: 'alt' }, lsGet(LS_VIEW, {})),
   me: null,              // {lat, lng, acc}
   loaded: false,
 };
@@ -691,6 +691,7 @@ const windArrow = (dir, size = 26) => dir == null ? '' : `<svg viewBox="0 0 24 2
 const zeitHM = iso => iso ? new Date(iso).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : '–';
 function windAlt(c) { if (!c?.abruf) return ''; const min = (Date.now() - new Date(c.zeit || c.abruf).getTime()) / 60000; return min > 90 ? ' (älter)' : ''; }
 function renderWind() {
+  flowCheck();
   const b = $('#windBadge'); if (!b) return;
   const c = wind.cur;
   b.classList.toggle('busy', wind.loading);
@@ -724,6 +725,76 @@ function openWind() {
   $('#windReload').onclick = async () => { await loadWind(true); openWind(); };
 }
 
+
+/* ---------- Wind-Animation über der Karte (ab 1.4.0) ---------- */
+const flow = { cv: null, ctx: null, parts: [], raf: 0, w: 0, h: 0, dpr: 1, last: 0 };
+function flowInit() {
+  const cv = document.createElement('canvas');
+  cv.id = 'windCanvas'; cv.className = 'wind-canvas'; cv.setAttribute('aria-hidden', 'true');
+  $('#map').after(cv);
+  flow.cv = cv; flow.ctx = cv.getContext('2d');
+  const clear = () => flow.ctx && flow.ctx.clearRect(0, 0, flow.w, flow.h);
+  map.on('movestart zoomstart', clear);
+  window.addEventListener('resize', flowSize);
+  document.addEventListener('visibilitychange', flowCheck);
+  $('#windAnimBtn').onclick = () => { state.view.windAnim = !state.view.windAnim; saveView(); flowCheck(); toast(state.view.windAnim ? 'Windanimation an' : 'Windanimation aus', 1400); };
+  flowSize(); flowCheck();
+}
+function flowSize() {
+  if (!flow.cv) return;
+  const r = $('#map').getBoundingClientRect();
+  flow.dpr = Math.min(2, window.devicePixelRatio || 1);
+  flow.w = r.width; flow.h = r.height;
+  flow.cv.width = Math.round(r.width * flow.dpr); flow.cv.height = Math.round(r.height * flow.dpr);
+  flow.cv.style.width = r.width + 'px'; flow.cv.style.height = r.height + 'px';
+  flow.ctx.setTransform(flow.dpr, 0, 0, flow.dpr, 0, 0);
+  const n = Math.round(Math.min(420, Math.max(120, r.width * r.height / 2600)) * (matchMedia('(prefers-reduced-motion: reduce)').matches ? 0.4 : 1));
+  flow.parts = Array.from({ length: n }, () => flowSpawn(true));
+}
+function flowSpawn(anywhere) {
+  return { x: Math.random() * flow.w, y: Math.random() * flow.h, age: anywhere ? Math.random() * 80 : 0, max: 50 + Math.random() * 60, j: 0.85 + Math.random() * 0.3 };
+}
+function flowActive() {
+  const c = wind.cur;
+  return !!(state.view.windAnim && c && c.dir != null && c.speed != null && document.visibilityState === 'visible' && state.view.tab === 'karte' && $('#sheet').hidden && $('#viewer').hidden);
+}
+function flowCheck() {
+  $('#windAnimBtn')?.classList.toggle('on', !!state.view.windAnim);
+  if (!flow.cv) return;
+  flow.cv.hidden = !state.view.windAnim;
+  if (flowActive()) { if (!flow.raf) { flow.last = 0; flow.raf = requestAnimationFrame(flowStep); } }
+  else if (flow.raf) { cancelAnimationFrame(flow.raf); flow.raf = 0; }
+}
+function flowStep(t) {
+  flow.raf = 0;
+  if (!flowActive()) { flow.ctx.clearRect(0, 0, flow.w, flow.h); return; }
+  const dt = flow.last ? Math.min(50, t - flow.last) / 16.7 : 1; flow.last = t;
+  const c = wind.cur, ctx = flow.ctx;
+  const to = (c.dir + 180) * Math.PI / 180;                 // Richtung, in die der Wind weht
+  const v = Math.min(5, 0.35 + c.speed * 0.09);              // px pro Frame, nach Windstärke
+  const gust = c.gust && c.speed ? Math.min(1.6, c.gust / Math.max(c.speed, 1)) : 1;
+  const wob = Math.sin(t / 900) * 0.06 + Math.sin(t / 2300) * 0.04; // leichtes Pendeln der Richtung
+  const pulse = 1 + (gust - 1) * Math.max(0, Math.sin(t / 1700)) * 0.5; // Böen
+  const dx = Math.sin(to + wob) * v * pulse * dt, dy = -Math.cos(to + wob) * v * pulse * dt;
+  // Spuren ausblenden
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.fillStyle = 'rgba(0,0,0,0.085)';
+  ctx.fillRect(0, 0, flow.w, flow.h);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.lineWidth = 1.6; ctx.lineCap = 'round';
+  ctx.strokeStyle = 'rgba(255,255,255,0.72)';
+  ctx.beginPath();
+  for (let i = 0; i < flow.parts.length; i++) {
+    const p = flow.parts[i];
+    const nx = p.x + dx * p.j, ny = p.y + dy * p.j;
+    ctx.moveTo(p.x, p.y); ctx.lineTo(nx, ny);
+    p.x = nx; p.y = ny; p.age += dt;
+    if (p.age > p.max || p.x < -10 || p.y < -10 || p.x > flow.w + 10 || p.y > flow.h + 10) flow.parts[i] = flowSpawn(false);
+  }
+  ctx.stroke();
+  flow.raf = requestAnimationFrame(flowStep);
+}
+
 /* ================= Ansichten ================= */
 function render() {
   $('#addBtn').hidden = !isAdmin() || meas.on;
@@ -738,7 +809,8 @@ function switchTab(tab, fromPop) {
   $('#view-karte').hidden = tab !== 'karte';
   $('#view-liste').hidden = tab !== 'liste';
   if (tab === 'liste') renderList();
-  else setTimeout(() => map.invalidateSize(), 30);
+  else setTimeout(() => { map.invalidateSize(); flowSize(); }, 30);
+  flowCheck();
   if (!fromPop && tab !== 'karte') history.pushState({ hs: 'tab' }, '');
 }
 function renderList() {
@@ -807,6 +879,7 @@ function openSheet(title, body, foot = '', { overLock = false } = {}) {
   $('#sheetBody').innerHTML = body;
   $('#sheetFoot').innerHTML = foot;
   $('#sheet').hidden = false;
+  flowCheck();
   $('#sheet').style.zIndex = overLock ? 1160 : '';
   $('#sheetBody').scrollTop = 0;
 }
@@ -814,6 +887,7 @@ function closeSheet(fromPop = false) {
   if ($('#sheet').hidden) return;
   if (sheetCleanup) { const c = sheetCleanup; sheetCleanup = null; c(); }
   $('#sheet').hidden = true;
+  flowCheck();
   if (!fromPop && history.state?.hs === 'sheet') { ignorePop++; history.back(); }
 }
 document.addEventListener('click', e => { if (e.target.closest('[data-close]')) closeSheet(); });
@@ -831,7 +905,7 @@ async function openViewer(path, title, pano) {
   $('#viewerTitle').textContent = title;
   body.className = 'viewer-body' + (pano ? ' pano' : '');
   body.innerHTML = '<p style="color:#ccc">Lade …</p>';
-  v.hidden = false; history.pushState({ hs: 'viewer' }, '');
+  v.hidden = false; history.pushState({ hs: 'viewer' }, ''); flowCheck();
   try {
     const u = await imgUrl(path);
     body.innerHTML = `<img src="${u}" alt="" class="${pano ? '' : 'photo'}" draggable="false">` + (pano ? '<div class="pano-bar"><i></i></div><div class="pano-hint">← zum Umsehen wischen →</div>' : '');
@@ -855,7 +929,7 @@ async function openViewer(path, title, pano) {
 }
 function closeViewer(fromPop = false) {
   if ($('#viewer').hidden) return;
-  $('#viewer').hidden = true; $('#viewerBody').innerHTML = '';
+  $('#viewer').hidden = true; $('#viewerBody').innerHTML = ''; flowCheck();
   if (!fromPop && history.state?.hs === 'viewer') { ignorePop++; history.back(); }
 }
 $('#viewerClose').onclick = () => closeViewer();
@@ -1807,6 +1881,7 @@ setInterval(() => { if (document.visibilityState === 'visible' && $('#sheet').hi
 (async function start() {
   measureTop();
   initMap();
+  flowInit();
   switchTab(state.view.tab === 'liste' ? 'liste' : 'karte', true);
   await loadCached();
   renderWind();

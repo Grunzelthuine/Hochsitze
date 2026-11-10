@@ -328,3 +328,6 @@ legend { font: 600 15px var(--serif); color: var(--green); padding: 0 6px; }
 .wind-fc .v { font-weight: 700; }
 .wind-fc .g { color: var(--muted); font-size: 12.5px; }
 .layer-name { top: 64px; }
+
+/* ---------- 1.4.0: Wind-Animation ---------- */
+.wind-canvas { position: absolute; left: 0; top: 0; z-index: 450; pointer-events: none; }
