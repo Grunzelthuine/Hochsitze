@@ -7,7 +7,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.6.0';
 const LS_CFG = 'hs.cfg.v1';
 const LS_DATA = 'hs.data.v1';
 const LS_PW = 'hs.pw.v1';
@@ -195,6 +195,7 @@ function normalize(d) {
 function applyOps(data, ops) {
   const d = normalize(clone(data || {}));
   for (const op of ops) {
+    if (op.t === 'meta') { if (op.val == null) delete d[op.key]; else d[op.key] = clone(op.val); continue; }
     const arr = d[op.coll === 'lecken' ? 'lecken' : 'sitze'];
     const i = arr.findIndex(s => s.id === op.sitzId);
     if (op.t === 'put') { if (i >= 0) arr[i] = clone(op.sitz); else arr.push(clone(op.sitz)); }
@@ -430,12 +431,13 @@ async function prepPhoto(file, kind) {
 }
 
 /* ================= Karte ================= */
-let map, baseLayer, sitzLayer, histLayer, flLayer, scentLayer, meMarker, meCircle;
+let map, baseLayer, sitzLayer, histLayer, flLayer, scentLayer, revLayer, meMarker, meCircle;
 function initMap() {
   map = L.map('map', { zoomControl: false, attributionControl: true, center: THUINE, zoom: 14, tap: true });
   L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(map);
   map.attributionControl.setPrefix(false);
   setLayer(state.view.layer, true);
+  revLayer = L.layerGroup().addTo(map);
   scentLayer = L.layerGroup().addTo(map);
   flLayer = L.layerGroup().addTo(map);
   sitzLayer = L.layerGroup().addTo(map);
@@ -493,6 +495,7 @@ function renderMap() {
   sitzLayer.clearLayers(); histLayer.clearLayers(); flLayer.clearLayers();
   if (meas.on) drawMeasure();
   drawScent();
+  drawRevier();
   const pend = pendingIds();
   for (const s of state.data.sitze) {
     if (s.flaeche) {
@@ -533,6 +536,7 @@ function renderMap() {
 }
 function fitAll(animate) {
   const pts = [...state.data.sitze, ...state.data.lecken].map(s => [s.lat, s.lng]);
+  if (state.data.revier) state.data.revier.polys.forEach(pl => pl[0].forEach(p => pts.push(p)));
   if (state.me) pts.push([state.me.lat, state.me.lng]);
   if (!pts.length) { map.setView(THUINE, 14, { animate }); return; }
   if (pts.length === 1) { map.setView(pts[0], 17, { animate }); return; }
@@ -654,6 +658,8 @@ const LS_WIND = 'hs.wind.v1';
 const wind = { cur: lsGet(LS_WIND, null), fc: null, loading: false, at: 0 };
 const angDiff = (a, b) => { const d = Math.abs((((a - b) % 360) + 360) % 360); return d > 180 ? 360 - d : d; };
 function windPos() {
+  const rv = state.data.revier;
+  if (rv?.polys?.length) { const o = rv.polys.flatMap(pl => pl[0]); return { lat: o.reduce((a, p) => a + p[0], 0) / o.length, lng: o.reduce((a, p) => a + p[1], 0) / o.length }; }
   const pts = [...state.data.sitze, ...state.data.lecken];
   if (!pts.length) return { lat: THUINE[0], lng: THUINE[1] };
   return { lat: pts.reduce((a, p) => a + p.lat, 0) / pts.length, lng: pts.reduce((a, p) => a + p.lng, 0) / pts.length };
@@ -853,6 +859,133 @@ function flowStep(t) {
   }
   ctx.stroke();
   flow.raf = requestAnimationFrame(flowStep);
+}
+
+
+/* ================= Reviergrenze (ab 1.6.0) ================= */
+function drawRevier() {
+  if (!revLayer) return;
+  revLayer.clearLayers();
+  const rv = state.data.revier; if (!rv?.polys?.length) return;
+  rv.polys.forEach(pl => {
+    revLayer.addLayer(L.polygon(pl, { color: '#000', weight: 6, opacity: .25, fill: false, interactive: false }));
+    revLayer.addLayer(L.polygon(pl, { color: '#ff5a1f', weight: 3, opacity: .95, fillColor: '#ff5a1f', fillOpacity: .03, interactive: false }));
+  });
+}
+const ringArea = r => areaM2(r);
+const polyArea = pl => Math.max(0, ringArea(pl[0]) - pl.slice(1).reduce((a, h) => a + ringArea(h), 0));
+function parseCoords(txt) {
+  return txt.trim().split(/\s+/).map(t => t.split(',').map(Number)).filter(a => a.length >= 2 && isFinite(a[0]) && isFinite(a[1])).map(a => [a[1], a[0]]);
+}
+function closeRing(r) { if (r.length > 2) { const a = r[0], b = r[r.length - 1]; if (a[0] === b[0] && a[1] === b[1]) r = r.slice(0, -1); } return r; }
+/** KML → [{name, poly:[outer, ...holes]}] (Polygone; geschlossene/lange Linien werden als Fläche genommen) */
+function parseKml(text) {
+  const doc = new DOMParser().parseFromString(text, 'application/xml');
+  if (doc.querySelector('parsererror')) throw new Error('Datei ist kein gültiges KML.');
+  const out = [];
+  const byTag = (el, tag) => [...el.getElementsByTagNameNS('*', tag)];
+  byTag(doc, 'Placemark').forEach(pm => {
+    const name = (byTag(pm, 'name')[0]?.textContent || '').trim();
+    byTag(pm, 'Polygon').forEach(pg => {
+      const outer = byTag(byTag(pg, 'outerBoundaryIs')[0] || pg, 'coordinates')[0];
+      if (!outer) return;
+      const rings = [closeRing(parseCoords(outer.textContent))];
+      byTag(pg, 'innerBoundaryIs').forEach(ib => { const c = byTag(ib, 'coordinates')[0]; if (c) rings.push(closeRing(parseCoords(c.textContent))); });
+      if (rings[0].length >= 3) out.push({ name, poly: rings, typ: 'Fläche' });
+    });
+    byTag(pm, 'LineString').forEach(ls => {
+      const c = byTag(ls, 'coordinates')[0]; if (!c) return;
+      const r = closeRing(parseCoords(c.textContent));
+      if (r.length >= 3) out.push({ name, poly: [r], typ: 'Linie' });
+    });
+  });
+  return out;
+}
+function parseGeoJson(text) {
+  const j = JSON.parse(text), out = [];
+  const feats = j.type === 'FeatureCollection' ? j.features : j.type === 'Feature' ? [j] : [{ geometry: j, properties: {} }];
+  feats.forEach(f => {
+    const g = f.geometry || {}, name = f.properties?.name || f.properties?.Name || '';
+    const conv = rings => rings.map(r => closeRing(r.map(c => [c[1], c[0]])));
+    if (g.type === 'Polygon') out.push({ name, poly: conv(g.coordinates), typ: 'Fläche' });
+    if (g.type === 'MultiPolygon') g.coordinates.forEach(p => out.push({ name, poly: conv(p), typ: 'Fläche' }));
+    if (g.type === 'LineString' && g.coordinates.length >= 3) out.push({ name, poly: conv([g.coordinates]), typ: 'Linie' });
+  });
+  return out;
+}
+/** KMZ = ZIP mit doc.kml → erste .kml-Datei entpacken */
+async function unzipKml(buf) {
+  const b = new Uint8Array(buf), dv = new DataView(buf);
+  let i = 0;
+  while (i + 30 < b.length && dv.getUint32(i, true) === 0x04034b50) {
+    const method = dv.getUint16(i + 8, true), csize = dv.getUint32(i + 18, true);
+    const nlen = dv.getUint16(i + 26, true), xlen = dv.getUint16(i + 28, true);
+    const name = new TextDecoder().decode(b.subarray(i + 30, i + 30 + nlen));
+    const start = i + 30 + nlen + xlen, data = b.subarray(start, start + csize);
+    if (/\.kml$/i.test(name)) {
+      if (method === 0) return new TextDecoder().decode(data);
+      if (method === 8 && typeof DecompressionStream !== 'undefined') {
+        const ds = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+        return await new Response(ds).text();
+      }
+      throw new Error('KMZ lässt sich hier nicht entpacken – bitte in My Maps „Als KML exportieren“ anhaken.');
+    }
+    if (!csize) break;
+    i = start + csize;
+  }
+  throw new Error('In der KMZ-Datei wurde keine KML gefunden.');
+}
+function pickRevierFile() {
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.kml,.kmz,.geojson,.json,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz';
+  inp.onchange = async () => {
+    const f = inp.files[0]; if (!f) return;
+    try {
+      let items;
+      if (/\.kmz$/i.test(f.name)) items = parseKml(await unzipKml(await f.arrayBuffer()));
+      else { const t = await f.text(); items = /^\s*[{[]/.test(t) ? parseGeoJson(t) : parseKml(t); }
+      if (!items.length) throw new Error('Keine Fläche oder Linie in der Datei gefunden.');
+      openRevierPreview(items, f.name);
+    } catch (e) { toast(e.message, 5000); }
+  };
+  inp.click();
+}
+function openRevierPreview(items, fname) {
+  items.forEach((it, i) => { it.m2 = polyArea(it.poly); it.on = true; it.i = i; });
+  // Linien nur vorauswählen, wenn es keine echten Flächen gibt
+  if (items.some(x => x.typ === 'Fläche')) items.forEach(x => { if (x.typ === 'Linie') x.on = false; });
+  let mini = null, grp = null;
+  openSheet('Reviergrenze importieren', `
+    <div class="mini-map tall" id="rvMini"></div>
+    <p class="hint">Aus „${esc(fname)}“. Haken bei allem, was zum Revier gehört (mehrere Teilflächen möglich).</p>
+    <div class="card pad"><ul class="hist">${items.map(it => `<li><i></i><label class="check" style="align-items:flex-start"><input type="checkbox" data-rv="${it.i}" ${it.on ? 'checked' : ''}><span><b>${esc(it.name || 'ohne Namen')}</b><small>${it.typ} · ${areaTxt(it.m2)} · ${it.poly[0].length} Punkte</small></span></label></li>`).join('')}</ul></div>
+    <label class="field"><span>Name</span><input id="rvName" value="${esc(items.find(x => x.on)?.name || 'Revier Thuine')}" autocomplete="off"></label>
+    <p class="hint" id="rvSum"></p>`,
+    `<button class="btn secondary" data-close>Abbrechen</button><button class="btn" id="rvSave">Übernehmen</button>`);
+  const draw = () => {
+    const sel = items.filter(x => x.on);
+    $('#rvSum').innerHTML = sel.length ? `Gesamt: <b>${areaTxt(sel.reduce((a, x) => a + x.m2, 0))}</b>` : 'Nichts ausgewählt.';
+    if (!mini) return;
+    grp.clearLayers();
+    items.forEach(it => grp.addLayer(L.polygon(it.poly, { color: it.on ? '#ff5a1f' : '#888', weight: it.on ? 3 : 1.5, dashArray: it.on ? null : '4 5', fillOpacity: it.on ? .08 : 0 })));
+  };
+  setTimeout(() => {
+    if (!$('#rvMini')) return;
+    mini = makeMini('rvMini', THUINE, 13); grp = L.featureGroup().addTo(mini);
+    draw();
+    setTimeout(() => { mini.invalidateSize(); try { mini.fitBounds(grp.getBounds().pad(0.05)); } catch { /* leer */ } }, 260);
+  }, 60);
+  $$('[data-rv]').forEach(c => c.onchange = () => { items[c.dataset.rv].on = c.checked; draw(); });
+  sheetCleanup = () => { if (mini) { mini.remove(); mini = null; } };
+  $('#rvSave').onclick = () => {
+    const sel = items.filter(x => x.on);
+    if (!sel.length) { toast('Bitte mindestens eine Fläche auswählen.'); return; }
+    if (!state.pw) { toast('Bitte zuerst das Passwort festlegen.'); return; }
+    const rnd = r => r.map(p => [Math.round(p[0] * 1e7) / 1e7, Math.round(p[1] * 1e7) / 1e7]);
+    const val = { name: $('#rvName').value.trim() || 'Revier', polys: sel.map(x => x.poly.map(rnd)), m2: Math.round(sel.reduce((a, x) => a + x.m2, 0)), quelle: fname, datum: todayISO() };
+    sheetCleanup(); sheetCleanup = null; closeSheet();
+    enqueue({ t: 'meta', key: 'revier', val, msg: `Reviergrenze „${val.name}“ importiert` });
+    setTimeout(() => { switchTab('karte'); fitAll(true); }, 300);
+  };
 }
 
 /* ================= Ansichten ================= */
@@ -1877,6 +2010,10 @@ function openSettings(fromLock = false) {
         <p class="hint" id="sTestMsg"></p>
       </div>
     </fieldset>
+    ${voll && !fromLock ? `<fieldset><legend>Reviergrenze</legend>
+      <p class="hint">${state.data.revier ? `Eingetragen: <b>${esc(state.data.revier.name || 'Revier')}</b> · ${areaTxt(state.data.revier.m2)} · Stand ${dateDE(state.data.revier.datum)}` : 'Noch keine Reviergrenze eingetragen.'} Import aus Google My Maps (KML/KMZ) oder GeoJSON.</p>
+      <div class="btn-row"><button type="button" class="btn secondary small" id="sRev">${state.data.revier ? 'Neu importieren' : 'Reviergrenze importieren'}</button>${state.data.revier ? '<button type="button" class="btn ghost small" id="sRevDel" style="color:var(--warn)">Entfernen</button>' : ''}</div>
+    </fieldset>` : ''}
     ${voll && !fromLock ? `<fieldset><legend>Datenschutz</legend>
       <p class="hint">${state.remoteEnc ? 'Daten und Fotos sind mit dem Passwort der Jagdgemeinschaft verschlüsselt.' : state.pw ? 'Passwort ist festgelegt – die Daten werden beim nächsten Speichern verschlüsselt.' : 'Noch kein Passwort festgelegt.'}</p>
       <button type="button" class="btn secondary small" id="sPw">${state.remoteEnc ? 'Passwort ändern' : state.pw ? 'Passwort neu festlegen' : 'Passwort festlegen'}</button>
@@ -1905,6 +2042,11 @@ function openSettings(fromLock = false) {
     } catch { msg.textContent = '❌ Keine Verbindung.'; }
   };
   $('#sPw')?.addEventListener('click', () => openPwSheet());
+  $('#sRev')?.addEventListener('click', () => pickRevierFile());
+  $('#sRevDel')?.addEventListener('click', e => {
+    const b = e.currentTarget; if (!b.dataset.sure) { b.dataset.sure = 1; b.textContent = 'Wirklich entfernen?'; return; }
+    closeSheet(); enqueue({ t: 'meta', key: 'revier', val: null, msg: 'Reviergrenze entfernt' });
+  });
   $('#sClear').onclick = async () => {
     const keep = new Set(state.queue.flatMap(o => o.files));
     const keys = (await idbKeys()) || [];

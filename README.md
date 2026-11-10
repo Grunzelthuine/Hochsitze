@@ -32,6 +32,9 @@ Eigenständige Test-App (PWA), die später in die App „Jagd Thuine“ einflie�
 - **Witterungsfahnen:** An jedem Hochsitz zeigt ein oranger Kegel, wohin die Witterung zieht (Richtung = Wind, Länge 80–350 m und Öffnung 12–40° je nach Windstärke; unter 4 km/h gestrichelter Kreis „kann umlaufen“). Ein/aus im Wind-Fenster (Wind-Kachel antippen).
 - Liegen Kirrung oder Freifläche in der Fahne, zeigen Hochsitz-Detail und Wind-Fenster „⚠ Witterung zieht über die Kirrung/Freifläche“.
 
+## Neu in v1.6.0
+- **Reviergrenze:** Einstellungen → „Reviergrenze importieren“ (nur voller Zugang). Liest KML/KMZ (z. B. Export aus Google My Maps) und GeoJSON, zeigt eine Vorschau mit allen Flächen/Linien zum Anhaken und die Größe in ha. Die Grenze erscheint orange auf der Karte, „Alle zeigen“ und der Wind-Ort richten sich danach. Gespeichert verschlüsselt als `revier` {name, polys, m2, quelle, datum}.
+
 ## Daten
 - `data/hochsitze.json`: verschlüsselt (AES-GCM, PBKDF2-SHA256 150.000), gleiches Format wie `strecke.json` in Jagd Thuine.
 - `data/fotos/*.bin`: verschlüsselte JPEGs (Format „SBE1“ wie die Dokumente in Jagd Thuine), jeweils mit Vorschaubild `-t.bin`.
