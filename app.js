@@ -7,7 +7,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.10.0';
+const APP_VERSION = '1.11.0';
 const LS_CFG = 'hs.cfg.v1';
 const LS_DATA = 'hs.data.v1';
 const LS_PW = 'hs.pw.v1';
@@ -1124,11 +1124,6 @@ const ASTRO = (() => {
   return { sunTimes, moonIllum, moonTimes, nextPhases };
 })();
 
-const BL_ARTEN = {
-  civil: { name: 'Bürgerliche Dämmerung (Sonne 6° unter Horizont)', kurz: 'bürgerliche Dämmerung' },
-  min30: { name: '30 Minuten vor Sonnenauf- / nach Sonnenuntergang', kurz: '±30 Min.' },
-  nautical: { name: 'Nautische Dämmerung (Sonne 12° unter Horizont)', kurz: 'nautische Dämmerung' },
-};
 const PHASEN = { 0: 'Neumond', 0.25: 'Zunehmender Halbmond', 0.5: 'Vollmond', 0.75: 'Abnehmender Halbmond' };
 const hm = d => d ? d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' }) : '–';
 const tagName = (d, i) => i === 0 ? 'Heute' : i === 1 ? 'Morgen' : i === 2 ? 'Übermorgen' : d.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' });
@@ -1137,12 +1132,10 @@ function dauer(ms) { const m = Math.max(0, Math.round(ms / 60000)); return m >= 
 /** Sonnenzeiten eines Tages inkl. Büchsenlicht und Nachtzeit (§ 19 BJagdG) */
 function sonnenTag(day) {
   const p = windPos(), d = new Date(day); d.setHours(12, 0, 0, 0);
-  const t = ASTRO.sunTimes(d, p.lat, p.lng, { sun: -0.833, civil: -6, nautical: -12 });
+  const t = ASTRO.sunTimes(d, p.lat, p.lng, { sun: -0.833, civil: -6 });
   const sa = t.sun?.rise || null, su = t.sun?.set || null;
-  const art = state.view.bl || 'civil';
-  let blA, blE;
-  if (art === 'min30') { blA = sa && new Date(sa - 30 * 60e3); blE = su && new Date(+su + 30 * 60e3); }
-  else { blA = t[art]?.rise || null; blE = t[art]?.set || null; }
+  // Büchsenlicht = bürgerliche Dämmerung (Sonne 6° unter dem Horizont) – so von Sebastian festgelegt
+  const blA = t.civil?.rise || null, blE = t.civil?.set || null;
   return { tag: d, sa, su, blA, blE, nachtAb: su && new Date(+su + 90 * 60e3), nachtBis: sa && new Date(sa - 90 * 60e3) };
 }
 /** Mond als kleines Bild: beleuchteter Teil hell, Rest dunkel (Nordhalbkugel: zunehmend rechts hell) */
@@ -1153,15 +1146,24 @@ function moonSvg(fraction, phase, size = 26) {
     : `<path d="M12 2 A${r} ${r} 0 0 ${sweepOuter} 12 22 A${rx.toFixed(2)} ${r} 0 0 ${sweepInner} 12 2Z" fill="#f6efc8"/>`;
   return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true"><circle cx="12" cy="12" r="${r}" fill="#3a4034" stroke="#c9c39a" stroke-width=".8"/>${lit}</svg>`;
 }
+const SUN_ICON = '<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="6.5" fill="#e6d23a"/><g stroke="#e6d23a" stroke-width="2.2" stroke-linecap="round"><path d="M16 2.5v4M16 25.5v4M2.5 16h4M25.5 16h4M6.5 6.5l2.8 2.8M22.7 22.7l2.8 2.8M6.5 25.5l2.8-2.8M22.7 9.3l2.8-2.8"/></g></svg>';
+const blIcon = ende => `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="6"/><path d="M12 2.5v3.5M12 18v3.5M2.5 12H6M18 12h3.5"/>${ende ? '<path d="m9.8 9.8 4.4 4.4M14.2 9.8l-4.4 4.4"/>' : '<path d="m9.3 12.2 1.9 1.9 3.6-3.8"/>'}</svg>`;
 function renderSun() {
   const b = $('#sunBadge'); if (!b) return;
-  const now = new Date(), t = sonnenTag(now), mi = ASTRO.moonIllum(now);
+  const now = new Date(), t = sonnenTag(now);
   let hint = '';
   if (t.blA && t.blE) {
     if (now < t.blA) hint = `Büchsenlicht in ${dauer(t.blA - now)}`;
     else if (now < t.blE) { const rest = t.blE - now; if (rest < 3 * 3600e3) hint = `noch ${dauer(rest)} Büchsenlicht`; }
   }
-  b.innerHTML = `<span class="s-moon">${moonSvg(mi.fraction, mi.phase, 30)}</span><span class="w-txt"><b>☀ ${hm(t.sa)} – ${hm(t.su)}</b><small>Büchsenlicht ${hm(t.blA)} – ${hm(t.blE)}</small>${hint ? `<small class="s-hint">${hint}</small>` : ''}</span>`;
+  b.innerHTML = `<div class="sb-grid">
+      <span class="sb-sun">${SUN_ICON}</span>
+      <span class="sb-ar">↑</span><span class="sb-t up">${hm(t.sa)}</span>
+      <span class="sb-ic" title="Erstes Büchsenlicht">${blIcon(false)}</span><span class="sb-t up">${hm(t.blA)}</span>
+      <span class="sb-ar">↓</span><span class="sb-t dn">${hm(t.su)}</span>
+      <span class="sb-ic" title="Letztes Büchsenlicht">${blIcon(true)}</span><span class="sb-t dn">${hm(t.blE)}</span>
+    </div>${hint ? `<div class="sb-hint">${hint}</div>` : ''}`;
+  b.setAttribute('aria-label', `Sonnenaufgang ${hm(t.sa)}, Sonnenuntergang ${hm(t.su)}, Büchsenlicht ${hm(t.blA)} bis ${hm(t.blE)}`);
 }
 function openSun() {
   const now = new Date(), p = windPos();
@@ -1174,7 +1176,6 @@ function openSun() {
     return { d, il, tm, i };
   });
   const naechste = phasen.find(x => x.phase === 0.5);
-  const art = state.view.bl || 'civil';
   openSheet('Sonne & Mond', `
     <div class="card"><table class="sun-tab">
       <thead><tr><th></th>${tage.map((t, i) => `<th>${tagName(t.tag, i)}<small>${t.tag.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}</small></th>`).join('')}</tr></thead>
@@ -1186,8 +1187,7 @@ function openSun() {
         <tr class="nz"><td>Nachtzeit ab<small>§ 19 BJagdG</small></td>${tage.map(t => `<td>${hm(t.nachtAb)}</td>`).join('')}</tr>
         <tr class="nz"><td>Nachtzeit bis<small>am Morgen</small></td>${tage.map(t => `<td>${hm(t.nachtBis)}</td>`).join('')}</tr>
       </tbody></table></div>
-    <label class="field"><span>Büchsenlicht rechnen als</span><select id="blArt">${Object.entries(BL_ARTEN).map(([k, a]) => `<option value="${k}" ${k === art ? 'selected' : ''}>${a.name}</option>`).join('')}</select></label>
-    <p class="hint">Büchsenlicht ist gesetzlich nicht festgelegt – entscheidend ist, dass du das Wild sicher ansprechen kannst. Nachtzeit nach § 19 BJagdG: 1,5 Stunden nach Sonnenuntergang bis 1,5 Stunden vor Sonnenaufgang (Schalenwild außer Schwarzwild darf dann nicht erlegt werden).</p>
+    <p class="hint">Büchsenlicht = bürgerliche Dämmerung (Sonne 6° unter dem Horizont). Gesetzlich ist es nicht festgelegt – entscheidend ist, dass du das Wild sicher ansprechen kannst. Nachtzeit nach § 19 BJagdG: 1,5 Stunden nach Sonnenuntergang bis 1,5 Stunden vor Sonnenaufgang (Schalenwild außer Schwarzwild darf dann nicht erlegt werden).</p>
 
     <h2 class="section">Mond</h2>
     <div class="card pad moon-now">${moonSvg(mi.fraction, mi.phase, 64)}
@@ -1200,7 +1200,6 @@ function openSun() {
       ${kal.map(k => `<tr class="${k.il.fraction > 0.9 ? 'voll' : ''}"><td>${tagName(k.d, k.i)}${k.i > 2 ? '' : `<small>${k.d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}</small>`}</td><td>${moonSvg(k.il.fraction, k.il.phase, 20)}</td><td>${Math.round(k.il.fraction * 100)} %</td><td>${hm(k.tm.rise)}</td><td>${hm(k.tm.set)}</td></tr>`).join('')}
     </tbody></table></div>
     <p class="hint">Alle Zeiten für die Reviermitte, auf dem Gerät berechnet (ohne Internet). Genauigkeit: Sonne etwa ±2 Minuten, Mondauf-/untergang etwa ±15 Minuten, Mondphasen auf den Tag genau. Licht = beleuchteter Anteil der Mondscheibe um 22 Uhr.</p>`);
-  $('#blArt').onchange = e => { state.view.bl = e.target.value; saveView(); renderSun(); openSun(); };
 }
 function mondName(phase) {
   const p = ((phase % 1) + 1) % 1;

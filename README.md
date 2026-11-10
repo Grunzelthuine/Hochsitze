@@ -48,8 +48,12 @@ Eigenständige Test-App (PWA), die später in die App „Jagd Thuine“ einflie�
 
 ## Neu in v1.10.0
 - **Sonne & Mond** (Kachel oben links unter dem Wind): Sonnenauf-/-untergang, erstes/letztes Büchsenlicht, Mondsymbol mit aktueller Phase; Hinweis „Büchsenlicht in …“ bzw. „noch … Büchsenlicht“ in den letzten 3 Stunden.
-- Antippen: Tabelle Heute/Morgen/Übermorgen (Büchsenlicht, Sonnenzeiten, Nachtzeit nach § 19 BJagdG), Auswahl der Büchsenlicht-Definition (bürgerliche Dämmerung −6° = Standard, ±30 Min., nautische Dämmerung −12°), Mond heute (Phase, % beleuchtet, Auf-/Untergang, nächster Vollmond), nächste Hauptphasen und Mondkalender für 14 Tage.
+- Antippen: Tabelle Heute/Morgen/Übermorgen (Büchsenlicht, Sonnenzeiten, Nachtzeit nach § 19 BJagdG), Mond heute (Phase, % beleuchtet, Auf-/Untergang, nächster Vollmond), nächste Hauptphasen und Mondkalender für 14 Tage.
 - Alles auf dem Gerät berechnet (ohne Internet), Formeln nach SunCalc (Vladimir Agafonkin, BSD-2-Clause). Abgeglichen mit der Python-Bibliothek astral: Sonne ±2 Min., Mond-Auf/Untergang ±15 Min., Phasen auf den Tag.
+
+## Neu in v1.11.0
+- Sonnen-Kachel neu gestaltet: Sonne, ↑ Aufgang / ↓ Untergang und Fadenkreuz-Symbole für erstes (✓) / letztes (✕) Büchsenlicht, obere Zeile hell, untere dunkel.
+- Büchsenlicht fest = bürgerliche Dämmerung (Sonne 6° unter dem Horizont); Auswahl entfällt.
 
 ## Daten
 - `data/hochsitze.json`: verschlüsselt (AES-GCM, PBKDF2-SHA256 150.000), gleiches Format wie `strecke.json` in Jagd Thuine.
