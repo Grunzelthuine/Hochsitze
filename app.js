@@ -7,7 +7,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.9.0';
+const APP_VERSION = '1.10.0';
 const LS_CFG = 'hs.cfg.v1';
 const LS_DATA = 'hs.data.v1';
 const LS_PW = 'hs.pw.v1';
@@ -169,7 +169,7 @@ const state = {
   remoteExists: false,
   data: { version: 1, sitze: [] }, // remote + eigene, noch nicht hochgeladene Änderungen
   queue: [],
-  view: Object.assign({ ctlZu: false, scent: true, windAnim: true, layer: 'luftbild', hist: false, tab: 'karte', sort: 'name', liste: 'sitze', lsort: 'alt' }, lsGet(LS_VIEW, {})),
+  view: Object.assign({ bl: 'civil', ctlZu: false, scent: true, windAnim: true, layer: 'luftbild', hist: false, tab: 'karte', sort: 'name', liste: 'sitze', lsort: 'alt' }, lsGet(LS_VIEW, {})),
   me: null,              // {lat, lng, acc}
   loaded: false,
 };
@@ -496,6 +496,7 @@ function initMap() {
   $('#ctlToggle').onclick = () => { state.view.ctlZu = !state.view.ctlZu; saveView(); ctl(); };
   ctl();
   $('#windBadge').onclick = () => { openWind(); loadWind(); };
+  $('#sunBadge').onclick = () => openSun();
   $('#measureBtn').onclick = () => (meas.on ? stopMeasure() : startMeasure());
   $('#measDone').onclick = () => stopMeasure();
   $('#measClear').onclick = () => { meas.targets = []; drawMeasure(); };
@@ -1030,6 +1031,187 @@ function openRevierPreview(items, fname) {
     enqueue({ t: 'meta', key: 'revier', val, msg: `Reviergrenze „${val.name}“ importiert` });
     setTimeout(() => { switchTab('karte'); fitAll(true); }, 300);
   };
+}
+
+/* ================= Sonne, Büchsenlicht & Mond (ab 1.10.0) =================
+ * Berechnung auf dem Gerät, ohne Internet. Formeln nach SunCalc (Vladimir Agafonkin, BSD-2-Clause),
+ * die wiederum auf den astronomischen Näherungen von astro.ukho.gov / „Astronomy Answers“ beruhen. */
+const ASTRO = (() => {
+  const PI = Math.PI, sin = Math.sin, cos = Math.cos, tan = Math.tan, asin = Math.asin, atan = Math.atan2, acos = Math.acos, rad = PI / 180;
+  const dayMs = 864e5, J1970 = 2440588, J2000 = 2451545, e = rad * 23.4397, J0 = 0.0009;
+  const toJulian = d => d.valueOf() / dayMs - 0.5 + J1970;
+  const fromJulian = j => new Date((j + 0.5 - J1970) * dayMs);
+  const toDays = d => toJulian(d) - J2000;
+  const rightAscension = (l, b) => atan(sin(l) * cos(e) - tan(b) * sin(e), cos(l));
+  const declination = (l, b) => asin(sin(b) * cos(e) + cos(b) * sin(e) * sin(l));
+  const altitude = (H, phi, dec) => asin(sin(phi) * sin(dec) + cos(phi) * cos(dec) * cos(H));
+  const siderealTime = (d, lw) => rad * (280.16 + 360.9856235 * d) - lw;
+  const astroRefraction = h => { if (h < 0) h = 0; return 0.0002967 / Math.tan(h + 0.00312536 / (h + 0.08901179)); };
+  const solarMeanAnomaly = d => rad * (357.5291 + 0.98560028 * d);
+  const eclipticLongitude = M => M + rad * (1.9148 * sin(M) + 0.02 * sin(2 * M) + 0.0003 * sin(3 * M)) + rad * 102.9372 + PI;
+  const sunCoords = d => { const L = eclipticLongitude(solarMeanAnomaly(d)); return { dec: declination(L, 0), ra: rightAscension(L, 0) }; };
+  const julianCycle = (d, lw) => Math.round(d - J0 - lw / (2 * PI));
+  const approxTransit = (Ht, lw, n) => J0 + (Ht + lw) / (2 * PI) + n;
+  const solarTransitJ = (ds, M, L) => J2000 + ds + 0.0053 * sin(M) - 0.0069 * sin(2 * L);
+  const hourAngle = (h, phi, d) => acos((sin(h) - sin(phi) * sin(d)) / (cos(phi) * cos(d)));
+  /** Zeiten, zu denen die Sonne die Höhe `deg` (Grad) erreicht: {rise, set}; date = beliebige Uhrzeit des Tages */
+  function sunTimes(date, lat, lng, degs) {
+    const lw = rad * -lng, phi = rad * lat, d = toDays(date), n = julianCycle(d, lw), ds = approxTransit(0, lw, n);
+    const M = solarMeanAnomaly(ds), L = eclipticLongitude(M), dec = declination(L, 0), Jnoon = solarTransitJ(ds, M, L);
+    const out = { noon: fromJulian(Jnoon) };
+    for (const [k, deg] of Object.entries(degs)) {
+      const w = hourAngle(deg * rad, phi, dec);
+      if (Number.isNaN(w)) { out[k] = null; continue; }
+      const Jset = solarTransitJ(approxTransit(w, lw, n), M, L);
+      out[k] = { rise: fromJulian(Jnoon - (Jset - Jnoon)), set: fromJulian(Jset) };
+    }
+    return out;
+  }
+  function moonCoords(d) {
+    const L = rad * (218.316 + 13.176396 * d), M = rad * (134.963 + 13.064993 * d), F = rad * (93.272 + 13.229350 * d);
+    const l = L + rad * 6.289 * sin(M), b = rad * 5.128 * sin(F), dt = 385001 - 20905 * cos(M);
+    return { ra: rightAscension(l, b), dec: declination(l, b), dist: dt };
+  }
+  function moonAltitude(date, lat, lng) {
+    const lw = rad * -lng, phi = rad * lat, d = toDays(date), c = moonCoords(d);
+    const H = siderealTime(d, lw) - c.ra; let h = altitude(H, phi, c.dec);
+    return h + astroRefraction(h);
+  }
+  /** fraction = beleuchteter Anteil 0..1, phase = 0 Neumond, .25 erstes Viertel, .5 Vollmond, .75 letztes Viertel */
+  function moonIllum(date) {
+    const d = toDays(date), s = sunCoords(d), m = moonCoords(d), sdist = 149598000;
+    const phi = acos(sin(s.dec) * sin(m.dec) + cos(s.dec) * cos(m.dec) * cos(s.ra - m.ra));
+    const inc = atan(sdist * sin(phi), m.dist - sdist * cos(phi));
+    const angle = atan(cos(s.dec) * sin(s.ra - m.ra), sin(s.dec) * cos(m.dec) - cos(s.dec) * sin(m.dec) * cos(s.ra - m.ra));
+    return { fraction: (1 + cos(inc)) / 2, phase: 0.5 + 0.5 * inc * (angle < 0 ? -1 : 1) / PI };
+  }
+  /** Mondaufgang/-untergang für den Kalendertag von `day0` (lokale Mitternacht) */
+  function moonTimes(day0, lat, lng) {
+    const t = new Date(day0); t.setHours(0, 0, 0, 0);
+    const at = h => new Date(t.getTime() + h * 3600e3), hc = 0.133 * rad;
+    let h0 = moonAltitude(t, lat, lng) - hc, rise, set;
+    for (let i = 1; i <= 24; i += 2) {
+      const h1 = moonAltitude(at(i), lat, lng) - hc, h2 = moonAltitude(at(i + 1), lat, lng) - hc;
+      const a = (h0 + h2) / 2 - h1, b = (h2 - h0) / 2, xe = -b / (2 * a), ye = (a * xe + b) * xe + h1, dd = b * b - 4 * a * h1;
+      let roots = 0, x1 = 0, x2 = 0;
+      if (dd >= 0) { const dx = Math.sqrt(dd) / (Math.abs(a) * 2); x1 = xe - dx; x2 = xe + dx; if (Math.abs(x1) <= 1) roots++; if (Math.abs(x2) <= 1) roots++; if (x1 < -1) x1 = x2; }
+      if (roots === 1) { if (h0 < 0) rise = i + x1; else set = i + x1; }
+      else if (roots === 2) { rise = i + (ye < 0 ? x2 : x1); set = i + (ye < 0 ? x1 : x2); }
+      if (rise != null && set != null) break;
+      h0 = h2;
+    }
+    return { rise: rise != null ? at(rise) : null, set: set != null ? at(set) : null };
+  }
+  /** Nächste Hauptphasen ab `from` (Neumond, erstes Viertel, Vollmond, letztes Viertel) */
+  function nextPhases(from, count = 5) {
+    const targets = [0, 0.25, 0.5, 0.75], out = [];
+    const diff = (p, t) => { let x = p - t; if (x > 0.5) x -= 1; if (x < -0.5) x += 1; return x; };
+    let t = from.getTime(), prev = moonIllum(new Date(t)).phase;
+    for (let k = 0; k < 24 * 60 && out.length < count; k++) {
+      const t2 = t + 3600e3, cur = moonIllum(new Date(t2)).phase;
+      for (const tg of targets) {
+        const a = diff(prev, tg), b = diff(cur, tg);
+        if (a < 0 && b >= 0 && b - a < 0.1) {
+          let lo = t, hi = t2;
+          for (let j = 0; j < 20; j++) { const mid = (lo + hi) / 2; if (diff(moonIllum(new Date(mid)).phase, tg) < 0) lo = mid; else hi = mid; }
+          out.push({ t: new Date(hi), phase: tg });
+        }
+      }
+      t = t2; prev = cur;
+    }
+    return out;
+  }
+  return { sunTimes, moonIllum, moonTimes, nextPhases };
+})();
+
+const BL_ARTEN = {
+  civil: { name: 'Bürgerliche Dämmerung (Sonne 6° unter Horizont)', kurz: 'bürgerliche Dämmerung' },
+  min30: { name: '30 Minuten vor Sonnenauf- / nach Sonnenuntergang', kurz: '±30 Min.' },
+  nautical: { name: 'Nautische Dämmerung (Sonne 12° unter Horizont)', kurz: 'nautische Dämmerung' },
+};
+const PHASEN = { 0: 'Neumond', 0.25: 'Zunehmender Halbmond', 0.5: 'Vollmond', 0.75: 'Abnehmender Halbmond' };
+const hm = d => d ? d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' }) : '–';
+const tagName = (d, i) => i === 0 ? 'Heute' : i === 1 ? 'Morgen' : i === 2 ? 'Übermorgen' : d.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' });
+function dauer(ms) { const m = Math.max(0, Math.round(ms / 60000)); return m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min` : `${m} min`; }
+
+/** Sonnenzeiten eines Tages inkl. Büchsenlicht und Nachtzeit (§ 19 BJagdG) */
+function sonnenTag(day) {
+  const p = windPos(), d = new Date(day); d.setHours(12, 0, 0, 0);
+  const t = ASTRO.sunTimes(d, p.lat, p.lng, { sun: -0.833, civil: -6, nautical: -12 });
+  const sa = t.sun?.rise || null, su = t.sun?.set || null;
+  const art = state.view.bl || 'civil';
+  let blA, blE;
+  if (art === 'min30') { blA = sa && new Date(sa - 30 * 60e3); blE = su && new Date(+su + 30 * 60e3); }
+  else { blA = t[art]?.rise || null; blE = t[art]?.set || null; }
+  return { tag: d, sa, su, blA, blE, nachtAb: su && new Date(+su + 90 * 60e3), nachtBis: sa && new Date(sa - 90 * 60e3) };
+}
+/** Mond als kleines Bild: beleuchteter Teil hell, Rest dunkel (Nordhalbkugel: zunehmend rechts hell) */
+function moonSvg(fraction, phase, size = 26) {
+  const r = 10, waxing = phase < 0.5, k = 1 - 2 * fraction; // Terminator-Ellipse: -1 (voll) … 1 (neu)
+  const rx = Math.abs(k) * r, sweepOuter = waxing ? 1 : 0, sweepInner = (k > 0) === waxing ? 0 : 1;
+  const lit = fraction < 0.01 ? '' : fraction > 0.99 ? `<circle cx="12" cy="12" r="${r}" fill="#f6efc8"/>`
+    : `<path d="M12 2 A${r} ${r} 0 0 ${sweepOuter} 12 22 A${rx.toFixed(2)} ${r} 0 0 ${sweepInner} 12 2Z" fill="#f6efc8"/>`;
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true"><circle cx="12" cy="12" r="${r}" fill="#3a4034" stroke="#c9c39a" stroke-width=".8"/>${lit}</svg>`;
+}
+function renderSun() {
+  const b = $('#sunBadge'); if (!b) return;
+  const now = new Date(), t = sonnenTag(now), mi = ASTRO.moonIllum(now);
+  let hint = '';
+  if (t.blA && t.blE) {
+    if (now < t.blA) hint = `Büchsenlicht in ${dauer(t.blA - now)}`;
+    else if (now < t.blE) { const rest = t.blE - now; if (rest < 3 * 3600e3) hint = `noch ${dauer(rest)} Büchsenlicht`; }
+  }
+  b.innerHTML = `<span class="s-moon">${moonSvg(mi.fraction, mi.phase, 30)}</span><span class="w-txt"><b>☀ ${hm(t.sa)} – ${hm(t.su)}</b><small>Büchsenlicht ${hm(t.blA)} – ${hm(t.blE)}</small>${hint ? `<small class="s-hint">${hint}</small>` : ''}</span>`;
+}
+function openSun() {
+  const now = new Date(), p = windPos();
+  const tage = [0, 1, 2].map(i => { const d = new Date(now); d.setDate(d.getDate() + i); return sonnenTag(d); });
+  const mi = ASTRO.moonIllum(now), mt = ASTRO.moonTimes(now, p.lat, p.lng);
+  const phasen = ASTRO.nextPhases(now, 5);
+  const kal = Array.from({ length: 14 }, (_, i) => {
+    const d = new Date(now); d.setDate(d.getDate() + i); d.setHours(22, 0, 0, 0);
+    const il = ASTRO.moonIllum(d), tm = ASTRO.moonTimes(d, p.lat, p.lng);
+    return { d, il, tm, i };
+  });
+  const naechste = phasen.find(x => x.phase === 0.5);
+  const art = state.view.bl || 'civil';
+  openSheet('Sonne & Mond', `
+    <div class="card"><table class="sun-tab">
+      <thead><tr><th></th>${tage.map((t, i) => `<th>${tagName(t.tag, i)}<small>${t.tag.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}</small></th>`).join('')}</tr></thead>
+      <tbody>
+        <tr class="bl"><td>Erstes Büchsenlicht</td>${tage.map(t => `<td>${hm(t.blA)}</td>`).join('')}</tr>
+        <tr><td>Sonnenaufgang</td>${tage.map(t => `<td>${hm(t.sa)}</td>`).join('')}</tr>
+        <tr><td>Sonnenuntergang</td>${tage.map(t => `<td>${hm(t.su)}</td>`).join('')}</tr>
+        <tr class="bl"><td>Letztes Büchsenlicht</td>${tage.map(t => `<td>${hm(t.blE)}</td>`).join('')}</tr>
+        <tr class="nz"><td>Nachtzeit ab<small>§ 19 BJagdG</small></td>${tage.map(t => `<td>${hm(t.nachtAb)}</td>`).join('')}</tr>
+        <tr class="nz"><td>Nachtzeit bis<small>am Morgen</small></td>${tage.map(t => `<td>${hm(t.nachtBis)}</td>`).join('')}</tr>
+      </tbody></table></div>
+    <label class="field"><span>Büchsenlicht rechnen als</span><select id="blArt">${Object.entries(BL_ARTEN).map(([k, a]) => `<option value="${k}" ${k === art ? 'selected' : ''}>${a.name}</option>`).join('')}</select></label>
+    <p class="hint">Büchsenlicht ist gesetzlich nicht festgelegt – entscheidend ist, dass du das Wild sicher ansprechen kannst. Nachtzeit nach § 19 BJagdG: 1,5 Stunden nach Sonnenuntergang bis 1,5 Stunden vor Sonnenaufgang (Schalenwild außer Schwarzwild darf dann nicht erlegt werden).</p>
+
+    <h2 class="section">Mond</h2>
+    <div class="card pad moon-now">${moonSvg(mi.fraction, mi.phase, 64)}
+      <div><div class="w-dir">${mondName(mi.phase)}</div>
+        <div class="w-spd">${Math.round(mi.fraction * 100)} % beleuchtet</div>
+        <div class="sub">Heute: Aufgang ${hm(mt.rise)} · Untergang ${hm(mt.set)}${naechste ? `<br>Nächster Vollmond: ${naechste.t.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' })}` : ''}</div></div></div>
+    <div class="card pad"><ul class="phasen">${phasen.map(x => `<li>${moonSvg(x.phase === 0 ? 0 : x.phase === 0.5 ? 1 : 0.5, x.phase === 0.75 ? 0.75 : x.phase, 22)}<span><b>${PHASEN[x.phase]}</b><small>${x.t.toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Berlin' })}</small></span></li>`).join('')}</ul></div>
+    <h2 class="section">Mondkalender (14 Tage)</h2>
+    <div class="card"><table class="moon-tab"><thead><tr><th>Tag</th><th></th><th>Licht</th><th>Aufgang</th><th>Untergang</th></tr></thead><tbody>
+      ${kal.map(k => `<tr class="${k.il.fraction > 0.9 ? 'voll' : ''}"><td>${tagName(k.d, k.i)}${k.i > 2 ? '' : `<small>${k.d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}</small>`}</td><td>${moonSvg(k.il.fraction, k.il.phase, 20)}</td><td>${Math.round(k.il.fraction * 100)} %</td><td>${hm(k.tm.rise)}</td><td>${hm(k.tm.set)}</td></tr>`).join('')}
+    </tbody></table></div>
+    <p class="hint">Alle Zeiten für die Reviermitte, auf dem Gerät berechnet (ohne Internet). Genauigkeit: Sonne etwa ±2 Minuten, Mondauf-/untergang etwa ±15 Minuten, Mondphasen auf den Tag genau. Licht = beleuchteter Anteil der Mondscheibe um 22 Uhr.</p>`);
+  $('#blArt').onchange = e => { state.view.bl = e.target.value; saveView(); renderSun(); openSun(); };
+}
+function mondName(phase) {
+  const p = ((phase % 1) + 1) % 1;
+  if (p < 0.03 || p > 0.97) return 'Neumond';
+  if (p < 0.22) return 'Zunehmende Sichel';
+  if (p < 0.28) return 'Zunehmender Halbmond';
+  if (p < 0.47) return 'Zunehmender Mond';
+  if (p < 0.53) return 'Vollmond';
+  if (p < 0.72) return 'Abnehmender Mond';
+  if (p < 0.78) return 'Abnehmender Halbmond';
+  return 'Abnehmende Sichel';
 }
 
 /* ================= Ansichten ================= */
@@ -2159,10 +2341,11 @@ setInterval(() => { if (document.visibilityState === 'visible' && $('#sheet').hi
   switchTab(state.view.tab === 'liste' ? 'liste' : 'karte', true);
   await loadCached();
   renderWind();
+  renderSun();
   load._last = Date.now();
   await load();
   loadWind(true);
-  setInterval(() => { if (document.visibilityState === 'visible') loadWind(); }, 60 * 1000);
+  setInterval(() => { if (document.visibilityState === 'visible') { loadWind(); renderSun(); } }, 60 * 1000);
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
     navigator.serviceWorker.register('sw.js').then(reg => {
       reg.addEventListener('updatefound', () => {

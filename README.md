@@ -46,6 +46,11 @@ Eigenständige Test-App (PWA), die später in die App „Jagd Thuine“ einflie�
 ## Neu in v1.9.0
 - Kartenknöpfe oben rechts lassen sich mit dem Pfeil-Knopf ein- und ausklappen (wird gemerkt). Eingeklappt bleibt der Nordpfeil sichtbar, wenn die Karte gedreht ist oder mit dem Kompass dreht.
 
+## Neu in v1.10.0
+- **Sonne & Mond** (Kachel oben links unter dem Wind): Sonnenauf-/-untergang, erstes/letztes Büchsenlicht, Mondsymbol mit aktueller Phase; Hinweis „Büchsenlicht in …“ bzw. „noch … Büchsenlicht“ in den letzten 3 Stunden.
+- Antippen: Tabelle Heute/Morgen/Übermorgen (Büchsenlicht, Sonnenzeiten, Nachtzeit nach § 19 BJagdG), Auswahl der Büchsenlicht-Definition (bürgerliche Dämmerung −6° = Standard, ±30 Min., nautische Dämmerung −12°), Mond heute (Phase, % beleuchtet, Auf-/Untergang, nächster Vollmond), nächste Hauptphasen und Mondkalender für 14 Tage.
+- Alles auf dem Gerät berechnet (ohne Internet), Formeln nach SunCalc (Vladimir Agafonkin, BSD-2-Clause). Abgeglichen mit der Python-Bibliothek astral: Sonne ±2 Min., Mond-Auf/Untergang ±15 Min., Phasen auf den Tag.
+
 ## Daten
 - `data/hochsitze.json`: verschlüsselt (AES-GCM, PBKDF2-SHA256 150.000), gleiches Format wie `strecke.json` in Jagd Thuine.
 - `data/fotos/*.bin`: verschlüsselte JPEGs (Format „SBE1“ wie die Dokumente in Jagd Thuine), jeweils mit Vorschaubild `-t.bin`.

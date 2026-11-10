@@ -347,3 +347,25 @@ legend { font: 600 15px var(--serif); color: var(--green); padding: 0 6px; }
 .map-ctl-tr.collapsed .map-btn:not(.ctl-toggle) { display: none; }
 /* Nordpfeil bleibt sichtbar, wenn die Karte gedreht ist oder mit dem Kompass dreht */
 .map-ctl-tr.collapsed #northBtn.rotated, .map-ctl-tr.collapsed #northBtn.follow { display: grid; }
+
+/* ---------- 1.10.0: Sonne, Büchsenlicht, Mond ---------- */
+.sun-badge { top: 66px; }
+.sun-badge .s-moon { display: grid; place-items: center; width: 30px; height: 30px; flex: none; }
+.sun-badge .s-hint { color: var(--warn); font-weight: 700; }
+.layer-name { top: 128px; }
+.sun-tab, .moon-tab { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+.sun-tab th, .sun-tab td, .moon-tab th, .moon-tab td { padding: 8px 6px; text-align: center; border-bottom: 1px solid var(--line); }
+.sun-tab th:first-child, .sun-tab td:first-child, .moon-tab td:first-child, .moon-tab th:first-child { text-align: left; padding-left: 12px; }
+.sun-tab tr:last-child td, .moon-tab tr:last-child td { border-bottom: 0; }
+.sun-tab th, .moon-tab th { font-size: 12.5px; color: var(--muted); font-weight: 700; }
+.sun-tab th small, .sun-tab td small, .moon-tab td small { display: block; font-weight: 400; font-size: 11px; color: var(--muted); }
+.sun-tab tr.bl td { font-weight: 700; color: var(--green); }
+.sun-tab tr.nz td { color: var(--muted); font-size: 13px; }
+.moon-tab td svg { display: block; margin: 0 auto; }
+.moon-tab tr.voll td { background: rgba(246, 239, 200, .5); }
+.moon-now { display: flex; align-items: center; gap: 16px; }
+.moon-now svg { flex: none; }
+.phasen { list-style: none; margin: 0; padding: 0; }
+.phasen li { display: flex; align-items: center; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--line); }
+.phasen li:last-child { border-bottom: 0; }
+.phasen small { display: block; color: var(--muted); }
