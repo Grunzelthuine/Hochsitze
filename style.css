@@ -370,15 +370,16 @@ legend { font: 600 15px var(--serif); color: var(--green); padding: 0 6px; }
 .phasen li:last-child { border-bottom: 0; }
 .phasen small { display: block; color: var(--muted); }
 
-/* ---------- 1.11.0: Sonnen-Kachel im Stil Auf/Ab + Büchsenlicht ---------- */
-.sun-badge { display: block; padding: 6px 8px; background: rgba(58, 56, 48, .9); border-color: rgba(0,0,0,.25); color: #fff; }
-.sb-grid { display: grid; grid-template-columns: 30px 12px auto 22px auto; grid-template-rows: auto auto; column-gap: 4px; align-items: stretch; }
+/* ---------- 1.11.0/1.11.1: Sonnen-Kachel (so klein wie die Wind-Kachel) ---------- */
+.sun-badge { display: block; top: 62px; min-width: 180px; padding: 5px 8px; background: rgba(58, 56, 48, .9); border-color: rgba(0,0,0,.25); color: #fff; }
+.sb-grid { display: grid; grid-template-columns: 22px 10px auto 16px auto; grid-template-rows: 16px 16px; justify-content: space-between; column-gap: 3px; row-gap: 1px; align-items: stretch; }
 .sb-sun { grid-row: 1 / 3; grid-column: 1; display: grid; place-items: center; }
-.sb-sun svg { width: 28px; height: 28px; }
-.sb-ar { display: grid; place-items: center; font-size: 13px; font-weight: 700; color: #fff; }
-.sb-ic { display: grid; place-items: center; color: #fff; margin-left: 6px; }
-.sb-ic svg { width: 18px; height: 18px; }
-.sb-t { display: grid; place-items: center; min-width: 50px; padding: 2px 6px; font: 500 16px/1.15 var(--sans); font-variant-numeric: tabular-nums; letter-spacing: .3px; }
+.sb-sun svg { width: 21px; height: 21px; }
+.sb-ar { display: grid; place-items: center; font-size: 10.5px; font-weight: 700; color: #fff; }
+.sb-ic { display: grid; place-items: center; color: #fff; margin-left: 4px; }
+.sb-ic svg { width: 14px; height: 14px; }
+.sb-t { display: grid; place-items: center; min-width: 40px; padding: 0 4px; font: 600 12.5px/1 var(--sans); font-variant-numeric: tabular-nums; letter-spacing: .2px; }
 .sb-t.up { background: #ada43a; color: #2b2a22; }
 .sb-t.dn { background: #26251f; color: #fff; }
-.sb-hint { margin-top: 5px; font-size: 11.5px; font-weight: 700; color: #ffcf8a; text-align: center; }
+.sb-hint { margin-top: 3px; font-size: 10.5px; font-weight: 700; color: #ffcf8a; text-align: center; }
+.layer-name { top: 118px; }
