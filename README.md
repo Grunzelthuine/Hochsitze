@@ -55,10 +55,15 @@ Eigenständige Test-App (PWA), die später in die App „Jagd Thuine“ einflie�
 - Sonnen-Kachel neu gestaltet: Sonne, ↑ Aufgang / ↓ Untergang und Fadenkreuz-Symbole für erstes (✓) / letztes (✕) Büchsenlicht, obere Zeile hell, untere dunkel.
 - Büchsenlicht fest = bürgerliche Dämmerung (Sonne 6° unter dem Horizont); Auswahl entfällt.
 
+## Neu in v1.12.0
+- **Bis zu 3 Schießbereiche je Hochsitz** (z. B. vorn auf den Graben, nach links und rechts) – jeder als eigener Kegel am Symbol, mit eigener Fächerbreite (30–180°).
+- **Fächer messen** mit dem Handy: Oberkante auf den linken Rand des Bereichs richten → tippen, auf den rechten Rand richten → tippen; die App setzt Mitte und Breite. Alternativ „Nur Richtung messen“ oder Richtung/Breite antippen.
+- Wind-Bewertung je Bereich („Bereich SW: von vorn, günstig“ …). Ältere Sitze mit einer Blickrichtung werden als ein Bereich mit 60° übernommen.
+
 ## Daten
 - `data/hochsitze.json`: verschlüsselt (AES-GCM, PBKDF2-SHA256 150.000), gleiches Format wie `strecke.json` in Jagd Thuine.
 - `data/fotos/*.bin`: verschlüsselte JPEGs (Format „SBE1“ wie die Dokumente in Jagd Thuine), jeweils mit Vorschaubild `-t.bin`.
-- Modell: `sitze: [{id, name, art (kanzel|leiter|drueckjagd|erdsitz|sonst), zustand (gut|maengel|gesperrt), bemerkung, lat, lng, acc, richtung (Grad|null), foto {f,t,w,h}, pano {f,t,w,h}, seit, erstellt, geaendert, verlauf: [{lat, lng, acc, richtung, von, bis, foto, pano}], flaeche: {pts: [[lat,lng]…], m2, datum} | null, kirrung: {lat, lng, datum} | null}]`.
+- Modell: `sitze: [{id, name, art (kanzel|leiter|drueckjagd|erdsitz|sonst), zustand (gut|maengel|gesperrt), bemerkung, lat, lng, acc, richtung (Grad|null, = erster Bereich), bereiche: [{r: Grad, b: Fächerbreite}] (max. 3), foto {f,t,w,h}, pano {f,t,w,h}, seit, erstellt, geaendert, verlauf: [{lat, lng, acc, richtung, von, bis, foto, pano}], flaeche: {pts: [[lat,lng]…], m2, datum} | null, kirrung: {lat, lng, datum} | null}]`.
 - `lecken: [{id, name, bemerkung, lat, lng, acc, foto, erstellt, geaendert, wartung: [{id, datum, art (bestueckt|kontrolliert|repariert), notiz, zeit}]}]`.
 
 ## Zugang

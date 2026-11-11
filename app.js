@@ -7,7 +7,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.11.4';
+const APP_VERSION = '1.12.0';
 const LS_CFG = 'hs.cfg.v1';
 const LS_DATA = 'hs.data.v1';
 const LS_PW = 'hs.pw.v1';
@@ -167,7 +167,7 @@ const state = {
   remote: null,          // Stand auf GitHub (entschlüsselt)
   remoteEnc: false,      // liegt die Datei verschlüsselt vor?
   remoteExists: false,
-  data: { version: 1, sitze: [] }, // remote + eigene, noch nicht hochgeladene Änderungen
+  data: { version: 1, sitze: [], lecken: [] }, // remote + eigene, noch nicht hochgeladene Änderungen
   queue: [],
   view: Object.assign({ bl: 'civil', ctlZu: false, scent: true, windAnim: true, layer: 'luftbild', hist: false, tab: 'karte', sort: 'name', liste: 'sitze', lsort: 'alt' }, lsGet(LS_VIEW, {})),
   me: null,              // {lat, lng, acc}
@@ -189,7 +189,7 @@ function normalize(d) {
   d.sitze = Array.isArray(d.sitze) ? d.sitze : [];
   d.lecken = Array.isArray(d.lecken) ? d.lecken : [];
   d.lecken.forEach(l => { l.wartung ||= []; l.bemerkung ||= ''; });
-  d.sitze.forEach(s => { if (s.flaeche && !(s.flaeche.pts?.length >= 3)) s.flaeche = null; if (s.kirrung === undefined) s.kirrung = null; s.verlauf ||= []; s.zustand ||= 'gut'; s.art ||= 'sonst'; s.bemerkung ||= ''; if (s.richtung === undefined) s.richtung = null; });
+  d.sitze.forEach(s => { if (s.flaeche && !(s.flaeche.pts?.length >= 3)) s.flaeche = null; if (s.kirrung === undefined) s.kirrung = null; s.verlauf ||= []; s.zustand ||= 'gut'; s.art ||= 'sonst'; s.bemerkung ||= ''; if (s.richtung === undefined) s.richtung = null; s.bereiche = bereicheOf(s); });
   return d;
 }
 function applyOps(data, ops) {
@@ -523,16 +523,28 @@ function toggleHist(on = !state.view.hist) {
   if (on) histLayer.addTo(map); else map.removeLayer(histLayer);
   toast(on ? 'Alte Standorte werden angezeigt' : 'Alte Standorte ausgeblendet', 1600);
 }
-function coneSvg(deg) {
-  if (deg == null) return '';
-  return `<svg class="hs-cone" viewBox="0 0 46 46" style="--r:${Math.round(deg)}deg" aria-hidden="true"><path d="M23 23 L12 3.95 A22 22 0 0 1 34 3.95 Z" fill="rgba(255,214,90,.55)" stroke="rgba(120,90,10,.8)" stroke-width="1"/></svg>`;
+/** Schießbereiche eines Sitzes: [{r: Richtung°, b: Fächerbreite°}] (ältere Sitze: nur `richtung` → ein Bereich mit 60°) */
+function bereicheOf(s) {
+  if (Array.isArray(s?.bereiche)) return s.bereiche.filter(x => x && x.r != null);
+  return s?.richtung != null ? [{ r: s.richtung, b: 60 }] : [];
 }
+/** Kreisausschnitt (Spitze in cx/cy, Mitte nach oben) */
+function wedgePath(cx, cy, R, b) {
+  const h = Math.min(Math.max(b, 6), 359) / 2 * Math.PI / 180;
+  const x1 = cx - R * Math.sin(h), y1 = cy - R * Math.cos(h), x2 = cx + R * Math.sin(h), y2 = y1;
+  return `M${cx} ${cy} L${x1.toFixed(2)} ${y1.toFixed(2)} A${R} ${R} 0 ${b > 180 ? 1 : 0} 1 ${x2.toFixed(2)} ${y2.toFixed(2)} Z`;
+}
+function coneSvg(bereiche) {
+  return (bereiche || []).map(x => `<svg class="hs-cone" viewBox="0 0 46 46" style="--r:${Math.round(x.r)}deg" aria-hidden="true"><path d="${wedgePath(23, 23, 22, x.b || 60)}" fill="rgba(255,214,90,.5)" stroke="rgba(120,90,10,.8)" stroke-width="1"/></svg>`).join('');
+}
+const bereichTxt = x => `${dirName(x.r)} ${Math.round(x.r)}° · ${Math.round(x.b || 60)}° breit`;
+const blickKurz = s => bereicheOf(s).map(x => dirName(x.r)).join(', ');
 function sitzIcon(s, pending) {
   const a = artOf(s);
   const ring = s.zustand === 'gesperrt' ? '#c0281a' : s.zustand === 'maengel' ? '#e0a000' : '#fff';
   return L.divIcon({
     className: 'hs-ico', iconSize: [46, 46], iconAnchor: [23, 23], tooltipAnchor: [0, 16],
-    html: `<div class="hs-wrap">${coneSvg(s.richtung)}<div class="hs-pin${pending ? ' pending' : ''}" style="background:${a.color};border-color:${ring}">${artIcon(s.art)}</div></div>`,
+    html: `<div class="hs-wrap">${coneSvg(bereicheOf(s))}<div class="hs-pin${pending ? ' pending' : ''}" style="background:${a.color};border-color:${ring}">${artIcon(s.art)}</div></div>`,
   });
 }
 function renderMap() {
@@ -703,9 +715,9 @@ const LS_WIND = 'hs.wind.v1';
 const wind = { cur: lsGet(LS_WIND, null), fc: null, loading: false, at: 0 };
 const angDiff = (a, b) => { const d = Math.abs((((a - b) % 360) + 360) % 360); return d > 180 ? 360 - d : d; };
 function windPos() {
-  const rv = state.data.revier;
+  const rv = state.data?.revier;
   if (rv?.polys?.length) { const o = rv.polys.flatMap(pl => pl[0]); return { lat: o.reduce((a, p) => a + p[0], 0) / o.length, lng: o.reduce((a, p) => a + p[1], 0) / o.length }; }
-  const pts = [...state.data.sitze, ...state.data.lecken];
+  const pts = [...(state.data?.sitze || []), ...(state.data?.lecken || [])];
   if (!pts.length) return { lat: THUINE[0], lng: THUINE[1] };
   return { lat: pts.reduce((a, p) => a + p.lat, 0) / pts.length, lng: pts.reduce((a, p) => a + p.lng, 0) / pts.length };
 }
@@ -759,11 +771,11 @@ function windFuerSitz(s) {
   const base = `aus ${dirName(c.dir)} (${Math.round(c.dir)}°), ${Math.round(c.speed)} km/h`;
   const warn = scentWarn(s), w = warn ? `<br><b style="color:var(--warn)">⚠ ${warn}</b>` : '';
   if (c.speed < 4) return `${base} – kaum Wind, kann umlaufen`;
-  if (s.richtung == null) return base + w;
-  const d = angDiff(c.dir, s.richtung);
-  if (d <= 60) return `${base} – <b style="color:var(--green)">von vorn, günstig</b>${w}`;
-  if (d >= 120) return `${base} – <b style="color:var(--warn)">im Rücken, ungünstig</b>${w}`;
-  return `${base} – <b style="color:var(--brass)">Seitenwind</b>${w}`;
+  const bs = bereicheOf(s);
+  if (!bs.length) return base + w;
+  const urteil = r => { const d = angDiff(c.dir, r); return d <= 60 ? '<b style="color:var(--green)">von vorn, günstig</b>' : d >= 120 ? '<b style="color:var(--warn)">im Rücken, ungünstig</b>' : '<b style="color:var(--brass)">Seitenwind</b>'; };
+  if (bs.length === 1) return `${base} – ${urteil(bs[0].r)}${w}`;
+  return `${base}${bs.map(x => `<br>Bereich ${dirName(x.r)}: ${urteil(x.r)}`).join('')}${w}`;
 }
 function openWind() {
   const c = wind.cur;
@@ -776,7 +788,7 @@ function openWind() {
     ${wind.fc?.length ? `<h2 class="section">Nächste Stunden</h2><div class="card"><ul class="wind-fc">${wind.fc.map(f => `<li><span class="t">${zeitHM(f.zeit)}</span><span class="a">${windArrow(f.dir, 18)}</span><span class="d">aus ${f.dir == null ? '–' : dirName(f.dir)}</span><span class="v">${f.speed == null ? '–' : Math.round(f.speed)} km/h</span><span class="g">${f.gust != null ? `Böen ${Math.round(f.gust)}` : ''}</span></li>`).join('')}</ul></div><p class="hint">Vorhersage: ${esc(wind.fcQuelle || '')}</p>` : ''}
     <div class="card pad"><label class="check"><input type="checkbox" id="scentChk" ${state.view.scent ? 'checked' : ''}> Witterungsfahnen an den Hochsitzen zeigen</label>
       <p class="hint" style="margin-top:6px">Der orange Kegel zeigt, wohin die Witterung vom Sitz zieht. Länge und Breite richten sich nach der Windstärke, bei Windstille (unter 4 km/h) ein Kreis: Wind kann umlaufen. Nur ein Anhalt – am Boden lenken Wald, Hecken und Senken den Wind um.</p></div>
-    ${state.data.sitze.some(s => s.richtung != null || scentWarn(s)) ? `<h2 class="section">Wind an den Sitzen (jetzt)</h2><div class="card pad"><ul class="hist">${state.data.sitze.filter(s => s.richtung != null || scentWarn(s)).map(s => `<li><i></i><div><b>${esc(s.name)}</b>${s.richtung != null ? ` · Blick ${dirName(s.richtung)}` : ''}<small>${windFuerSitz(s)}</small></div></li>`).join('')}</ul></div>` : ''}`
+    ${state.data.sitze.some(s => bereicheOf(s).length || scentWarn(s)) ? `<h2 class="section">Wind an den Sitzen (jetzt)</h2><div class="card pad"><ul class="hist">${state.data.sitze.filter(s => bereicheOf(s).length || scentWarn(s)).map(s => `<li><i></i><div><b>${esc(s.name)}</b>${bereicheOf(s).length ? ` · Blick ${blickKurz(s)}` : ''}<small>${windFuerSitz(s)}</small></div></li>`).join('')}</ul></div>` : ''}`
     : '<p class="hint">Noch keine Winddaten – bitte Internetverbindung prüfen.</p>';
   openSheet('Wind', body, `<button class="btn secondary" id="windReload">Aktualisieren</button>`);
   $('#windReload').onclick = async () => { await loadWind(true); openWind(); };
@@ -1302,7 +1314,7 @@ function renderList() {
       ${rows.map(s => `<button class="sitz" data-id="${esc(s.id)}">
         <div class="th" ${s.foto ? `data-img="${esc(s.foto.t)}"` : `style="background:${artOf(s).color}"`}>${s.foto ? '' : artIcon(s.art)}</div>
         <div style="min-width:0"><div class="nm">${esc(s.name)}</div>
-          <div class="mt">${esc(artOf(s).short)}${s.richtung != null ? ` · Blick ${dirName(s.richtung)}` : ''}${s.pano ? ' · Panorama' : ''}</div>
+          <div class="mt">${esc(artOf(s).short)}${bereicheOf(s).length ? ` · Blick ${blickKurz(s)}` : ''}${s.pano ? ' · Panorama' : ''}</div>
           ${s.zustand !== 'gut' || pend.has(s.id) ? `<div style="margin-top:5px;display:flex;gap:5px;flex-wrap:wrap">${s.zustand !== 'gut' ? `<span class="badge ${s.zustand}">${ZUSTAND[s.zustand]}</span>` : ''}${pend.has(s.id) ? '<span class="badge wait">nicht hochgeladen</span>' : ''}</div>` : ''}
         </div>
         <div class="ds" data-dist="${esc(s.id)}"></div>
@@ -1408,7 +1420,7 @@ function openDetail(id) {
     </div>
     ${s.bemerkung ? `<div class="note">${esc(s.bemerkung)}</div>` : ''}
     <dl class="facts">
-      <dt>Blickrichtung</dt><dd>${dirTxt(s.richtung)}</dd>
+      <dt>${bereicheOf(s).length > 1 ? 'Schießbereiche' : 'Schießbereich'}</dt><dd>${bereicheOf(s).length ? bereicheOf(s).map(bereichTxt).join('<br>') : 'nicht angegeben'}</dd>
       ${windFuerSitz(s) ? `<dt>Wind jetzt</dt><dd>${windFuerSitz(s)}</dd>` : ''}
       ${me ? `<dt>Entfernung</dt><dd>${distM(me, s) <= Math.max(10, me.acc || 0) ? 'Du bist am Sitz' : `${distTxt(distM(me, s))} Richtung ${dirName(bearing(me, s))}`}</dd>` : ''}
       <dt>Steht hier seit</dt><dd>${dateDE(s.seit)}</dd>
@@ -1486,8 +1498,6 @@ function estimate(samples) {
   use.forEach(s => { const k = 1 / (s.acc * s.acc); w += k; lat += s.lat * k; lng += s.lng * k; });
   return { lat: lat / w, lng: lng / w, acc: best, n: use.length };
 }
-const dirSeg = deg => `<div class="dir-grid">${DIRS.map((d, i) => `<button type="button" data-dir="${i * 45}" class="${deg != null && dirName(deg) === d ? 'on' : ''}">${d}</button>`).join('')}</div>`;
-const roseSvg = `<svg viewBox="0 0 92 92" aria-hidden="true"><g font-size="10" font-weight="700" fill="#66694f" text-anchor="middle" font-family="sans-serif"><text x="46" y="13">N</text><text x="84" y="50">O</text><text x="46" y="87">S</text><text x="8" y="50">W</text></g><g class="needle" id="needle"><path d="M46 46 L37 20 A28 28 0 0 1 55 20 Z" fill="rgba(255,200,60,.6)" stroke="#9b7a32"/><circle cx="46" cy="46" r="4" fill="#1f4a24"/></g></svg>`;
 
 function openCapture(mode, id) {
   if (!isAdmin()) return;
@@ -1496,7 +1506,7 @@ function openCapture(mode, id) {
   const neu = mode === 'neu', move = mode === 'umstellen', edit = mode === 'bearbeiten';
   const f = {
     name: s?.name || '', art: s?.art || 'kanzel', zustand: s?.zustand || 'gut', bemerkung: s?.bemerkung || '',
-    richtung: s ? s.richtung : null, foto: edit ? s.foto : null, pano: edit ? s.pano : null,
+    bereiche: s ? clone(bereicheOf(s)) : [], foto: edit ? s.foto : null, pano: edit ? s.pano : null,
     newFoto: null, newPano: null, datum: todayISO(),
   };
   const gps = { samples: [], est: null, manual: null, watch: null };
@@ -1519,13 +1529,10 @@ function openCapture(mode, id) {
       <div class="field"><span>Zustand</span><div class="seg zst" id="fZst">${Object.entries(ZUSTAND).map(([k, t]) => `<button type="button" data-v="${k}" class="${f.zustand === k ? 'on' : ''}">${t}</button>`).join('')}</div></div>
       <label class="field"><span>Bemerkung</span><textarea id="fBem" placeholder="z. B. Sprosse lose, Dach neu 2026, Zugang von Norden">${esc(f.bemerkung)}</textarea></label>
     </fieldset>`;
-  const dirBlock = `<fieldset><legend>Blickrichtung</legend>
-      <div class="compass"><div class="rose">${roseSvg}</div>
-        <div><div class="dir-val" id="dirVal">${f.richtung == null ? '–' : Math.round(f.richtung) + '°'}<small id="dirTxt">${f.richtung == null ? 'nicht angegeben' : dirName(f.richtung)}</small></div></div></div>
-      <div class="btn-row"><button type="button" class="btn secondary small" id="cmpStart">🧭 Mit Kompass messen</button></div>
-      <p class="hint" id="cmpHint">Handy flach halten, Oberkante in Blickrichtung des Sitzes zeigen, dann „Übernehmen“.</p>
-      ${dirSeg(f.richtung)}
-      <button type="button" class="btn ghost small" id="dirNone">keine Richtung</button>
+  const dirBlock = `<fieldset><legend>Schießbereiche</legend>
+      <p class="hint">Bis zu 3 Bereiche (z. B. vorn auf den Graben, nach links und rechts). „Fächer messen“: Handy flach halten, erst die Oberkante auf den <b>linken</b> Rand des Bereichs richten und tippen, dann auf den <b>rechten</b> Rand.</p>
+      <div id="bxList"></div>
+      <button type="button" class="btn secondary small" id="bxAdd">＋ Weiteren Schießbereich</button>
     </fieldset>`;
   const photoBlock = `<fieldset><legend>Fotos</legend>
       <div class="photo-slots">
@@ -1587,32 +1594,61 @@ function openCapture(mode, id) {
   const segWire = (sel, key) => $$(`${sel} button`).forEach(b => b.onclick = () => { f[key] = b.dataset.v; $$(`${sel} button`).forEach(x => x.classList.toggle('on', x === b)); });
   if (!move) { segWire('#fArt', 'art'); segWire('#fZst', 'zustand'); }
 
-  /* --- Richtung --- */
-  const setDir = deg => {
-    f.richtung = deg == null ? null : ((deg % 360) + 360) % 360;
-    $('#dirVal').innerHTML = `${f.richtung == null ? '–' : Math.round(f.richtung) + '°'}<small id="dirTxt">${f.richtung == null ? 'nicht angegeben' : dirName(f.richtung)}</small>`;
-    $$('[data-dir]').forEach(b => b.classList.toggle('on', f.richtung != null && dirName(f.richtung) === DIRS[b.dataset.dir / 45]));
-    $('#needle').style.transform = `rotate(${f.richtung ?? 0}deg)`;
-    $('#needle').style.opacity = f.richtung == null ? .25 : 1;
-    if (miniDir) miniDir();
+  /* --- Schießbereiche --- */
+  const BREITEN = [30, 45, 60, 90, 120, 180];
+  let mess = null, live = null; // mess = {i, kind: 'dir'|'fan', left}
+  const norm = d => ((d % 360) + 360) % 360;
+  const roseB = (i) => `<svg viewBox="0 0 92 92" aria-hidden="true"><g font-size="10" font-weight="700" fill="#66694f" text-anchor="middle" font-family="sans-serif"><text x="46" y="13">N</text><text x="84" y="50">O</text><text x="46" y="87">S</text><text x="8" y="50">W</text></g>
+    ${f.bereiche.map((x, k) => x.r == null ? '' : `<path d="${wedgePath(46, 46, 30, x.b)}" transform="rotate(${x.r} 46 46)" fill="${k === i ? 'rgba(255,200,60,.65)' : 'rgba(155,122,50,.18)'}" stroke="${k === i ? '#9b7a32' : 'none'}"/>`).join('')}
+    <g class="live-needle" style="display:none"><path d="M46 46 L46 14" stroke="#c0281a" stroke-width="2.5" stroke-linecap="round"/></g><circle cx="46" cy="46" r="4" fill="#1f4a24"/></svg>`;
+  const renderBx = () => {
+    const el = $('#bxList'); if (!el) return;
+    el.innerHTML = f.bereiche.map((x, i) => {
+      const m = mess && mess.i === i;
+      const fanTxt = m && mess.kind === 'fan' ? (mess.left == null ? '✓ Linker Rand' : '✓ Rechter Rand') : '🧭 Fächer messen';
+      return `<div class="bx${m ? ' active' : ''}" data-i="${i}">
+        <div class="compass"><div class="rose">${roseB(i)}</div>
+          <div><div class="dir-val">${x.r == null ? '–' : Math.round(x.r) + '°'}<small>${x.r == null ? 'Richtung fehlt' : `${dirName(x.r)} · ${Math.round(x.b)}° breit`}</small></div>
+          <div class="bx-live sub"></div></div></div>
+        <div class="btn-row"><button type="button" class="btn ${m && mess.kind === 'fan' ? '' : 'secondary'} small" data-mf="${i}">${fanTxt}</button>
+          <button type="button" class="btn ${m && mess.kind === 'dir' ? '' : 'secondary'} small" data-mr="${i}">${m && mess.kind === 'dir' ? '✓ Richtung übernehmen' : 'Nur Richtung messen'}</button></div>
+        ${m ? '<button type="button" class="btn ghost small" data-mx>Messen abbrechen</button>' : ''}
+        <div class="dir-grid">${DIRS.map((d, k) => `<button type="button" data-bd="${i}:${k * 45}" class="${x.r != null && dirName(x.r) === d ? 'on' : ''}">${d}</button>`).join('')}</div>
+        <div class="seg bx-w">${BREITEN.map(b => `<button type="button" data-bw="${i}:${b}" class="${Math.round(x.b) === b ? 'on' : ''}">${b}°</button>`).join('')}</div>
+        <button type="button" class="btn ghost small" data-bdel="${i}" style="color:var(--warn)">Bereich entfernen</button>
+      </div>`;
+    }).join('') || '<p class="hint">Noch kein Schießbereich.</p>';
+    $('#bxAdd').hidden = f.bereiche.length >= 3;
+    $$('[data-bd]', el).forEach(b => b.onclick = () => { const [i, d] = b.dataset.bd.split(':').map(Number); stopCompass(); f.bereiche[i].r = d; changed(); });
+    $$('[data-bw]', el).forEach(b => b.onclick = () => { const [i, w] = b.dataset.bw.split(':').map(Number); f.bereiche[i].b = w; changed(); });
+    $$('[data-bdel]', el).forEach(b => b.onclick = () => { stopCompass(); f.bereiche.splice(Number(b.dataset.bdel), 1); changed(); });
+    $$('[data-mr]', el).forEach(b => b.onclick = () => messen(Number(b.dataset.mr), 'dir'));
+    $$('[data-mf]', el).forEach(b => b.onclick = () => messen(Number(b.dataset.mf), 'fan'));
+    $('[data-mx]', el)?.addEventListener('click', () => stopCompass());
   };
-  $$('[data-dir]').forEach(b => b.onclick = () => { stopCompass(); setDir(Number(b.dataset.dir)); });
-  $('#dirNone').onclick = () => { stopCompass(); setDir(null); };
-  let live = null;
-  const stopCompass = () => { if (compassStop) { compassStop(); compassStop = null; } const b = $('#cmpStart'); if (b) { b.textContent = '🧭 Mit Kompass messen'; b.classList.add('secondary'); } };
-  $('#cmpStart').onclick = async () => {
-    if (compassStop) { // läuft → übernehmen
-      if (live != null) setDir(live);
-      stopCompass(); toast(`Richtung ${dirTxt(f.richtung)} übernommen`); return;
+  const changed = () => { renderBx(); if (miniDir) miniDir(); };
+  const showLive = h => {
+    const card = mess && $(`.bx[data-i="${mess.i}"]`); if (!card) return;
+    const n = $('.live-needle', card); n.style.display = ''; n.setAttribute('transform', `rotate(${h} 46 46)`);
+    $('.bx-live', card).textContent = `Handy zeigt ${Math.round(h)}° ${dirName(h)}` + (mess.kind === 'fan' && mess.left != null ? ` · linker Rand ${Math.round(mess.left)}°` : '');
+  };
+  async function messen(i, kind) {
+    if (mess && mess.i === i && mess.kind === kind && compassStop) {
+      if (live == null) { toast('Noch kein Kompasswert.', 2000); return; }
+      if (kind === 'dir') { f.bereiche[i].r = norm(live); toast(`Richtung ${dirTxt(live)} übernommen`); stopCompass(); return; }
+      if (mess.left == null) { mess.left = live; toast(`Linker Rand ${Math.round(live)}° – jetzt auf den rechten Rand zeigen`, 2500); renderBx(); showLive(live); return; }
+      const w = Math.min(270, Math.max(10, norm(live - mess.left)));
+      f.bereiche[i].r = norm(mess.left + w / 2); f.bereiche[i].b = Math.round(w);
+      toast(`Fächer ${Math.round(w)}° breit, Mitte ${dirTxt(f.bereiche[i].r)}`, 2500); stopCompass(); return;
     }
-    compassStop = await startCompass(h => {
-      live = h;
-      $('#needle').style.transform = `rotate(${h}deg)`; $('#needle').style.opacity = 1;
-      $('#dirVal').innerHTML = `${Math.round(h)}°<small>${dirName(h)} · live</small>`;
-    });
-    if (compassStop) { const b = $('#cmpStart'); b.textContent = '✓ Richtung übernehmen'; b.classList.remove('secondary'); }
-  };
-  setDir(f.richtung);
+    stopCompass();
+    mess = { i, kind, left: null }; live = null; renderBx();
+    compassStop = await startCompass(h => { live = h; showLive(h); });
+    if (!compassStop) { mess = null; renderBx(); }
+  }
+  function stopCompass() { if (compassStop) { compassStop(); compassStop = null; } mess = null; live = null; changed(); }
+  $('#bxAdd').onclick = () => { if (f.bereiche.length >= 3) return; const last = f.bereiche[f.bereiche.length - 1]; f.bereiche.push({ r: last?.r != null ? norm(last.r + 90) : null, b: 60 }); changed(); };
+  renderBx();
 
   /* --- Mini-Karte & GPS --- */
   const startLL = s ? [s.lat, s.lng] : state.me ? [state.me.lat, state.me.lng] : map.getCenter();
@@ -1624,12 +1660,12 @@ function openCapture(mode, id) {
       L.marker([s.lat, s.lng], { icon: L.divIcon({ className: 'hs-old', iconSize: [12, 12], iconAnchor: [6, 6], html: '<i></i>' }), interactive: false }).addTo(mini)
         .bindTooltip('bisher', { permanent: true, direction: 'top', className: 'hs-label' });
     }
-    miniMarker = L.marker(startLL, { draggable: true, icon: sitzIcon({ art: f.art, richtung: f.richtung, zustand: f.zustand }) });
+    miniMarker = L.marker(startLL, { draggable: true, icon: sitzIcon({ art: f.art, bereiche: f.bereiche, zustand: f.zustand }) });
     if (edit) miniMarker.addTo(mini);
     miniCircle = L.circle(startLL, { radius: 0, color: '#1c6fe0', weight: 1, fillOpacity: .12, interactive: false }).addTo(mini);
     miniMarker.on('dragend', () => { const ll = miniMarker.getLatLng(); gps.manual = { lat: ll.lat, lng: ll.lng }; manualHint(); checkNear(); });
     mini.on('click', e => { gps.manual = { lat: e.latlng.lat, lng: e.latlng.lng }; miniMarker.setLatLng(e.latlng).addTo(mini); manualHint(); checkNear(); });
-    miniDir = () => { miniMarker.setIcon(sitzIcon({ art: f.art, richtung: f.richtung, zustand: f.zustand })); };
+    miniDir = () => { miniMarker.setIcon(sitzIcon({ art: f.art, bereiche: f.bereiche, zustand: f.zustand })); };
     setTimeout(() => mini.invalidateSize(), 250);
     if (gps.est) showGps();
   }, 60);
@@ -1716,16 +1752,18 @@ function openCapture(mode, id) {
       const panoRef = f.newPano ? await store(f.newPano, 'pano') : null;
       f.newFoto && (f.newFoto.url = null); f.newPano && (f.newPano.url = null); // URL gehört jetzt dem Cache
       const now = new Date().toISOString();
+      const bereiche = f.bereiche.filter(x => x.r != null).map(x => ({ r: Math.round(x.r), b: Math.round(x.b || 60) }));
+      const richtung = bereiche[0]?.r ?? null;
       let n, msg;
       if (neu) {
         n = { id: sid, name, art: f.art, zustand: f.zustand, bemerkung: f.bemerkung, lat: p.lat, lng: p.lng, acc: p.acc ? Math.round(p.acc * 10) / 10 : null,
-          richtung: f.richtung, foto: fotoRef, pano: panoRef, seit: todayISO(), erstellt: now, geaendert: now, verlauf: [] };
+          richtung, bereiche, foto: fotoRef, pano: panoRef, seit: todayISO(), erstellt: now, geaendert: now, verlauf: [] };
         msg = `Hochsitz „${name}“ erfasst`;
       } else if (move) {
         n = clone(s);
         const datum = $('#fDatum').value || todayISO();
-        n.verlauf.unshift({ lat: s.lat, lng: s.lng, acc: s.acc, richtung: s.richtung, von: s.seit, bis: datum, foto: s.foto, pano: s.pano });
-        Object.assign(n, { lat: p.lat, lng: p.lng, acc: p.acc ? Math.round(p.acc * 10) / 10 : null, richtung: f.richtung, seit: datum, geaendert: now });
+        n.verlauf.unshift({ lat: s.lat, lng: s.lng, acc: s.acc, richtung: s.richtung, bereiche: bereicheOf(s), von: s.seit, bis: datum, foto: s.foto, pano: s.pano });
+        Object.assign(n, { lat: p.lat, lng: p.lng, acc: p.acc ? Math.round(p.acc * 10) / 10 : null, richtung, bereiche, seit: datum, geaendert: now });
         if (fotoRef) n.foto = fotoRef;
         if (panoRef) n.pano = panoRef;
         msg = `Hochsitz „${s.name}“ umgestellt (${distTxt(distM(s, p))})`;
@@ -1735,7 +1773,7 @@ function openCapture(mode, id) {
         const used = new Set(n.verlauf.flatMap(v => [v.foto?.f, v.foto?.t, v.pano?.f, v.pano?.t]).filter(Boolean));
         if ((fotoRef || !f.foto) && s.foto && !used.has(s.foto.f)) removed.push(s.foto.f, s.foto.t);
         if ((panoRef || !f.pano) && s.pano && !used.has(s.pano.f)) removed.push(s.pano.f, s.pano.t);
-        Object.assign(n, { name, art: f.art, zustand: f.zustand, bemerkung: f.bemerkung, richtung: f.richtung, foto: fotoRef || f.foto, pano: panoRef || f.pano, geaendert: now });
+        Object.assign(n, { name, art: f.art, zustand: f.zustand, bemerkung: f.bemerkung, richtung, bereiche, foto: fotoRef || f.foto, pano: panoRef || f.pano, geaendert: now });
         if (gps.manual || gps.est) Object.assign(n, { lat: p.lat, lng: p.lng, acc: p.acc ? Math.round(p.acc * 10) / 10 : n.acc });
         msg = `Hochsitz „${name}“ bearbeitet`;
         cleanup(); sheetCleanup = null;
