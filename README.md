@@ -8,7 +8,7 @@ Eigenständige Test-App (PWA), die später in die App „Jagd Thuine“ einflie�
 - Karte mit allen Hochsitzen: Luftbild (Esri), topografische Karte (BKG TopPlusOpen), OpenStreetMap. Symbol je Art, gelber Kegel = Blickrichtung, Ring gelb = Mängel, rot = gesperrt.
 - Erfassen am Sitz (nur voller Zugang): GPS wird laufend gemessen und gemittelt (Genauigkeit sichtbar), Punkt von Hand verschiebbar. Name, Art, Zustand, Bemerkung, Blickrichtung (Kompass oder antippen), Foto und Handy-Panorama.
 - Steht man beim Erfassen ≤ 30 m neben einem vorhandenen Sitz, fragt die App, ob dieser umgestellt wurde.
-- Umstellen: neue GPS-Position, Datum, optional neue Fotos/Richtung. Der alte Standort bleibt mit Zeitraum, Fotos und Panorama im Verlauf. Karte: Uhr-Knopf blendet alte Standorte (gestrichelt) ein.
+- Umstellen: neue GPS-Position, Datum, optional neue Fotos/Richtung. Der alte Standort bleibt mit Zeitraum, Fotos und Panorama im Verlauf. Alte Standorte erscheinen nur auf Wunsch über „Auf Karte“ im Verlauf (ab v1.13.2 kein eigener Kartenknopf mehr).
 - Liste mit Suche und Sortierung nach Name, Entfernung oder Art.
 - Offline: Änderungen ohne Netz landen in einer Warteschlange und werden automatisch hochgeladen. Angesehene Kartenkacheln und Fotos bleiben auf dem Gerät.
 
@@ -68,6 +68,9 @@ Eigenständige Test-App (PWA), die später in die App „Jagd Thuine“ einflie�
 
 ## Neu in v1.13.1
 - Eigener Kartenknopf für die **Witterungsfahnen** (Punkt mit gestricheltem Kegel, über dem Wind-Knopf); grün = an. Das Häkchen im Wind-Fenster bleibt und ist synchron.
+
+## Neu in v1.13.2
+- Kartenknopf „Alte Standorte“ entfernt (umgesetzte Sitze kommen in der Regel nicht an den alten Platz zurück). Im Hochsitz-Verlauf zeigt „Auf Karte“ den alten Standort kurz mit gestrichelter Linie; Tipp in die Karte blendet ihn aus.
 
 ## Daten
 - `data/hochsitze.json`: verschlüsselt (AES-GCM, PBKDF2-SHA256 150.000), gleiches Format wie `strecke.json` in Jagd Thuine.

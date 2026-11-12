@@ -7,7 +7,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.13.1';
+const APP_VERSION = '1.13.2';
 const LS_CFG = 'hs.cfg.v1';
 const LS_DATA = 'hs.data.v1';
 const LS_PW = 'hs.pw.v1';
@@ -495,15 +495,13 @@ function initMap() {
   scentLayer = L.layerGroup().addTo(map);
   flLayer = L.layerGroup().addTo(map);
   sitzLayer = L.layerGroup().addTo(map);
-  histLayer = L.layerGroup();
-  if (state.view.hist) histLayer.addTo(map);
-  $('#histBtn').classList.toggle('on', state.view.hist);
+  histLayer = L.layerGroup().addTo(map); // nur für „alter Standort auf Karte“ aus dem Verlauf, kurzzeitig
+  map.on('click', () => { if (!meas.on) histLayer.clearLayers(); });
   map.on('zoomend', labelZoom); labelZoom();
   $('#layerBtn').onclick = () => {
     const keys = Object.keys(LAYERS);
     setLayer(keys[(keys.indexOf(state.view.layer) + 1) % keys.length]);
   };
-  $('#histBtn').onclick = () => toggleHist();
   $('#scentBtn').onclick = () => setScent(!state.view.scent);
   $('#scentBtn').classList.toggle('on', !!state.view.scent);
   const labels = () => { $('#map').classList.toggle('no-labels', !state.view.labels); $('#labelBtn').classList.toggle('on', !!state.view.labels); };
@@ -539,11 +537,14 @@ function setLayer(key, silent) {
   }
 }
 function labelZoom() { $('#map').classList.toggle('z-lo', map.getZoom() < 15); }
-function toggleHist(on = !state.view.hist) {
-  state.view.hist = on; saveView();
-  $('#histBtn').classList.toggle('on', on);
-  if (on) histLayer.addTo(map); else map.removeLayer(histLayer);
-  toast(on ? 'Alte Standorte werden angezeigt' : 'Alte Standorte ausgeblendet', 1600);
+/** Einen alten Standort aus dem Verlauf kurz auf der Karte zeigen (gestrichelte Linie zum heutigen Standort) */
+function zeigeAltenStandort(s, v) {
+  histLayer.clearLayers();
+  histLayer.addLayer(L.polyline([[s.lat, s.lng], [v.lat, v.lng]], { color: '#333', weight: 2, dashArray: '5 6', opacity: .8, interactive: false }));
+  const om = L.marker([v.lat, v.lng], { icon: L.divIcon({ className: 'hs-old', iconSize: [12, 12], iconAnchor: [6, 6], html: '<i></i>' }), interactive: false });
+  om.bindTooltip(`${esc(s.name)} – alter Standort<br><small>${dateDE(v.von)} – ${dateDE(v.bis)}</small>`, { permanent: true, direction: 'top' });
+  histLayer.addLayer(om);
+  toast('Alter Standort – in die Karte tippen zum Ausblenden', 2500);
 }
 /** Schießbereiche eines Sitzes: [{r: Richtung°, b: Fächerbreite°}] (ältere Sitze: nur `richtung` → ein Bereich mit 60°) */
 function bereicheOf(s) {
@@ -571,7 +572,7 @@ function sitzIcon(s, pending) {
 }
 function renderMap() {
   if (!map) return;
-  sitzLayer.clearLayers(); histLayer.clearLayers(); flLayer.clearLayers();
+  sitzLayer.clearLayers(); flLayer.clearLayers();
   if (meas.on) drawMeasure();
   drawScent();
   drawRevier();
@@ -601,16 +602,6 @@ function renderMap() {
     m.bindTooltip(esc(s.name), { permanent: true, direction: 'bottom', className: 'hs-label', offset: [0, 4] });
     m.on('click', e => pick(e, () => openDetail(s.id), s.name));
     sitzLayer.addLayer(m);
-    let prev = [s.lat, s.lng];
-    for (const v of s.verlauf) {
-      const p = [v.lat, v.lng];
-      histLayer.addLayer(L.polyline([prev, p], { color: '#333', weight: 2, dashArray: '5 6', opacity: .75, interactive: false }));
-      const om = L.marker(p, { icon: L.divIcon({ className: 'hs-old', iconSize: [12, 12], iconAnchor: [6, 6], html: '<i></i>' }) });
-      om.bindTooltip(`${esc(s.name)}<br><small>bis ${dateDE(v.bis)}</small>`, { direction: 'top' });
-      om.on('click', e => pick(e, () => openDetail(s.id), `${s.name} (alt)`));
-      histLayer.addLayer(om);
-      prev = p;
-    }
   }
 }
 function fitAll(animate) {
@@ -1484,8 +1475,8 @@ function openDetail(id) {
   $$('[data-hfoto]', root).forEach(b => b.onclick = () => openViewer(s.verlauf[b.dataset.hfoto].foto.f, `${s.name} · bis ${dateDE(s.verlauf[b.dataset.hfoto].bis)}`));
   $$('[data-hpano]', root).forEach(b => b.onclick = () => openViewer(s.verlauf[b.dataset.hpano].pano.f, `${s.name} · Panorama bis ${dateDE(s.verlauf[b.dataset.hpano].bis)}`, true));
   $$('[data-hmap]', root).forEach(b => b.onclick = () => {
-    const v = s.verlauf[b.dataset.hmap]; closeSheet(); if (!state.view.hist) toggleHist(true);
-    switchTab('karte'); setTimeout(() => map.fitBounds(L.latLngBounds([[v.lat, v.lng], [s.lat, s.lng]]).pad(0.5), { maxZoom: 18 }), 60);
+    const v = s.verlauf[b.dataset.hmap]; closeSheet();
+    switchTab('karte'); zeigeAltenStandort(s, v); setTimeout(() => map.fitBounds(L.latLngBounds([[v.lat, v.lng], [s.lat, s.lng]]).pad(0.5), { maxZoom: 18 }), 60);
   });
   $$('[data-hdel]', root).forEach(b => b.onclick = () => {
     if (!b.dataset.sure) { b.dataset.sure = 1; b.textContent = 'Wirklich entfernen?'; return; }
