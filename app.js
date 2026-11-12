@@ -7,7 +7,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.12.0';
+const APP_VERSION = '1.13.0';
 const LS_CFG = 'hs.cfg.v1';
 const LS_DATA = 'hs.data.v1';
 const LS_PW = 'hs.pw.v1';
@@ -169,7 +169,7 @@ const state = {
   remoteExists: false,
   data: { version: 1, sitze: [], lecken: [] }, // remote + eigene, noch nicht hochgeladene Änderungen
   queue: [],
-  view: Object.assign({ bl: 'civil', ctlZu: false, scent: true, windAnim: true, layer: 'luftbild', hist: false, tab: 'karte', sort: 'name', liste: 'sitze', lsort: 'alt' }, lsGet(LS_VIEW, {})),
+  view: Object.assign({ labels: true, bl: 'civil', ctlZu: false, scent: true, windAnim: true, layer: 'luftbild', hist: false, tab: 'karte', sort: 'name', liste: 'sitze', lsort: 'alt' }, lsGet(LS_VIEW, {})),
   me: null,              // {lat, lng, acc}
   loaded: false,
 };
@@ -397,10 +397,27 @@ function hydrateImages(root = document) {
     } catch { el.classList.add('img-fail'); }
   });
 }
+/** Datei auswählen. Das <input> hängt im Dokument, solange die Auswahl offen ist –
+ *  sonst verliert iOS (v. a. als installierte App) gelegentlich das change-Ereignis. Kein `capture`:
+ *  so bietet das iPhone „Foto aufnehmen“, „Mediathek“ und „Datei“ zur Wahl. */
+function pickFile(accept, onFile) {
+  $$('input.hs-pick').forEach(x => x.remove());
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.className = 'hs-pick';
+  if (accept) inp.accept = accept;
+  inp.style.cssText = 'position:fixed;left:-1000px;top:0;width:1px;height:1px;opacity:0';
+  document.body.appendChild(inp);
+  let done = false;
+  const fire = () => { if (done) return; const f = inp.files && inp.files[0]; if (!f) return; done = true; setTimeout(() => inp.remove(), 1000); onFile(f); };
+  inp.addEventListener('change', fire);
+  inp.addEventListener('input', fire);
+  inp.addEventListener('cancel', () => inp.remove());
+  inp.click();
+}
 function loadImage(file) {
   return new Promise((res, rej) => {
     const u = URL.createObjectURL(file), img = new Image();
-    img.onload = () => res({ img, done: () => URL.revokeObjectURL(u) });
+    img.onload = () => { const ok = () => res({ img, done: () => URL.revokeObjectURL(u) }); img.decode ? img.decode().then(ok, ok) : ok(); };
     img.onerror = () => { URL.revokeObjectURL(u); rej(new Error('Bild konnte nicht gelesen werden')); };
     img.src = u;
   });
@@ -487,6 +504,9 @@ function initMap() {
     setLayer(keys[(keys.indexOf(state.view.layer) + 1) % keys.length]);
   };
   $('#histBtn').onclick = () => toggleHist();
+  const labels = () => { $('#map').classList.toggle('no-labels', !state.view.labels); $('#labelBtn').classList.toggle('on', !!state.view.labels); };
+  $('#labelBtn').onclick = () => { state.view.labels = !state.view.labels; saveView(); labels(); toast(state.view.labels ? 'Namen werden angezeigt' : 'Namen ausgeblendet', 1400); };
+  labels();
   $('#fitBtn').onclick = () => fitAll(true);
   const ctl = () => {
     const zu = !!state.view.ctlZu;
@@ -544,7 +564,7 @@ function sitzIcon(s, pending) {
   const ring = s.zustand === 'gesperrt' ? '#c0281a' : s.zustand === 'maengel' ? '#e0a000' : '#fff';
   return L.divIcon({
     className: 'hs-ico', iconSize: [46, 46], iconAnchor: [23, 23], tooltipAnchor: [0, 16],
-    html: `<div class="hs-wrap">${coneSvg(bereicheOf(s))}<div class="hs-pin${pending ? ' pending' : ''}" style="background:${a.color};border-color:${ring}">${artIcon(s.art)}</div></div>`,
+    html: `<div class="hs-wrap">${coneSvg(bereicheOf(s))}<div class="hs-pin${pending ? ' pending' : ''}${s.umstellung ? ' offen' : ''}" style="background:${a.color};border-color:${ring}">${artIcon(s.art)}</div></div>`,
   });
 }
 function renderMap() {
@@ -1025,9 +1045,7 @@ async function unzipKml(buf) {
 }
 function pickRevierFile() {
   // Kein accept-Filter: iOS kennt .kml/.kmz nicht und graut die Dateien sonst aus. Inhalt wird nach der Auswahl geprüft.
-  const inp = document.createElement('input'); inp.type = 'file';
-  inp.onchange = async () => {
-    const f = inp.files[0]; if (!f) return;
+  pickFile('', async f => {
     try {
       let items;
       const buf = await f.arrayBuffer(), head = new Uint8Array(buf.slice(0, 4));
@@ -1041,8 +1059,7 @@ function pickRevierFile() {
       if (!items.length) throw new Error('Keine Fläche oder Linie in der Datei gefunden.');
       openRevierPreview(items, f.name);
     } catch (e) { toast(e.message, 5000); }
-  };
-  inp.click();
+  });
 }
 function openRevierPreview(items, fname) {
   items.forEach((it, i) => { it.m2 = polyArea(it.poly); it.on = true; it.i = i; });
@@ -1294,11 +1311,12 @@ function renderList() {
   const counts = {};
   sitze.forEach(s => { counts[s.art] = (counts[s.art] || 0) + 1; });
   const mangel = sitze.filter(s => s.zustand !== 'gut').length;
+  const offen = sitze.filter(s => s.umstellung).length;
   el.innerHTML = `${listSeg()}
     <div class="card pad">
       <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px">
         <div><div style="font:600 30px/1 var(--serif);color:var(--green)">${sitze.length}</div><div class="sub">${sitze.length === 1 ? 'Hochsitz' : 'Hochsitze'} im Revier</div></div>
-        ${mangel ? `<span class="badge maengel">${mangel} mit Mängeln/gesperrt</span>` : ''}
+        <div style="display:grid;gap:4px;justify-items:end">${mangel ? `<span class="badge maengel">${mangel} mit Mängeln/gesperrt</span>` : ''}${offen ? `<span class="badge umst">${offen} Umstellung${offen === 1 ? '' : 'en'} offen</span>` : ''}</div>
       </div>
       <div class="legend" style="margin-top:10px">${Object.entries(ARTEN).filter(([k]) => counts[k]).map(([k, a]) => `<span><i style="background:${a.color}"></i>${esc(a.short)} ${counts[k]}</span>`).join('')}</div>
     </div>
@@ -1315,7 +1333,7 @@ function renderList() {
         <div class="th" ${s.foto ? `data-img="${esc(s.foto.t)}"` : `style="background:${artOf(s).color}"`}>${s.foto ? '' : artIcon(s.art)}</div>
         <div style="min-width:0"><div class="nm">${esc(s.name)}</div>
           <div class="mt">${esc(artOf(s).short)}${bereicheOf(s).length ? ` · Blick ${blickKurz(s)}` : ''}${s.pano ? ' · Panorama' : ''}</div>
-          ${s.zustand !== 'gut' || pend.has(s.id) ? `<div style="margin-top:5px;display:flex;gap:5px;flex-wrap:wrap">${s.zustand !== 'gut' ? `<span class="badge ${s.zustand}">${ZUSTAND[s.zustand]}</span>` : ''}${pend.has(s.id) ? '<span class="badge wait">nicht hochgeladen</span>' : ''}</div>` : ''}
+          ${s.zustand !== 'gut' || pend.has(s.id) || s.umstellung ? `<div style="margin-top:5px;display:flex;gap:5px;flex-wrap:wrap">${s.umstellung ? '<span class="badge umst">Umstellung offen</span>' : ''}${s.zustand !== 'gut' ? `<span class="badge ${s.zustand}">${ZUSTAND[s.zustand]}</span>` : ''}${pend.has(s.id) ? '<span class="badge wait">nicht hochgeladen</span>' : ''}</div>` : ''}
         </div>
         <div class="ds" data-dist="${esc(s.id)}"></div>
       </button>`).join('') || (sitze.length ? '<div class="card pad empty">Nichts gefunden.</div>' : `<div class="card pad empty"><img src="icons/logo.png" alt=""><p>Noch keine Hochsitze erfasst.${isAdmin() ? '<br>Auf der Karte unten „+ Hochsitz erfassen“ tippen, wenn du am Sitz stehst.' : ''}</p></div>`)}
@@ -1410,7 +1428,11 @@ function openDetail(id) {
   const me = state.me;
   const fotoOld = v => v.foto && (!s.foto || v.foto.f !== s.foto.f);
   const panoOld = v => v.pano && (!s.pano || v.pano.f !== s.pano.f);
-  const body = `
+  const um = s.umstellung, okI = b => b ? '✓' : '–';
+  const umBox = um ? `<div class="umst-box"><b>⚠ Umstellung offen</b> seit ${dateDE(um.seit)}<br>Am neuen Standort neu erfassen:
+      <ul><li class="${bereicheOf(s).length ? 'ok' : ''}">${okI(bereicheOf(s).length)} Schießbereiche</li><li class="${s.foto ? 'ok' : ''}">${okI(s.foto)} Foto vom Sitz</li><li class="${s.pano ? 'ok' : ''}">${okI(s.pano)} Panorama (freiwillig)</li></ul>
+      ${isAdmin() ? `<div class="btn-row"><button class="btn secondary small" id="umErf">Fotos & Bereiche erfassen</button><button class="btn small" id="umFin">✓ Umstellung abschließen</button></div>` : ''}</div>` : '';
+  const body = `${umBox}
     <div class="det-photo">${s.foto ? `<img data-img="${esc(s.foto.t)}" data-full="${esc(s.foto.f)}" alt="Foto ${esc(s.name)}" id="detFoto">` : `<div class="ph-empty">Kein Foto</div>`}</div>
     ${s.pano ? `<button class="pano-strip" id="detPano" data-img="${esc(s.pano.t)}"><span>🔭 Panorama vom Sitz ansehen</span></button>` : ''}
     <div style="display:flex;gap:6px;flex-wrap:wrap">
@@ -1467,6 +1489,14 @@ function openDetail(id) {
   wireFlaecheSection(s);
   $('#detEdit')?.addEventListener('click', () => openCapture('bearbeiten', s.id));
   $('#detMove')?.addEventListener('click', () => openCapture('umstellen', s.id));
+  $('#umErf')?.addEventListener('click', () => openCapture('bearbeiten', s.id));
+  $('#umFin')?.addEventListener('click', e => {
+    const b = e.currentTarget, fehlt = !bereicheOf(s).length || !s.foto;
+    if (fehlt && !b.dataset.sure) { b.dataset.sure = 1; b.textContent = 'Fehlt noch etwas – trotzdem abschließen?'; return; }
+    const n = clone(s); delete n.umstellung; n.geaendert = new Date().toISOString();
+    enqueue({ t: 'put', sitzId: s.id, sitzName: s.name, sitz: n, msg: `Umstellung „${s.name}“ abgeschlossen` });
+    toast('Umstellung abgeschlossen ✓'); setTimeout(() => openDetail(s.id), 200);
+  });
   $('#detDel')?.addEventListener('click', e => {
     const b = e.currentTarget;
     if (!b.dataset.sure) { b.dataset.sure = 1; b.textContent = 'Nochmal tippen zum endgültigen Löschen'; return; }
@@ -1506,7 +1536,7 @@ function openCapture(mode, id) {
   const neu = mode === 'neu', move = mode === 'umstellen', edit = mode === 'bearbeiten';
   const f = {
     name: s?.name || '', art: s?.art || 'kanzel', zustand: s?.zustand || 'gut', bemerkung: s?.bemerkung || '',
-    bereiche: s ? clone(bereicheOf(s)) : [], foto: edit ? s.foto : null, pano: edit ? s.pano : null,
+    bereiche: s && !move ? clone(bereicheOf(s)) : [], foto: edit ? s.foto : null, pano: edit ? s.pano : null,
     newFoto: null, newPano: null, datum: todayISO(),
   };
   const gps = { samples: [], est: null, manual: null, watch: null };
@@ -1530,7 +1560,7 @@ function openCapture(mode, id) {
       <label class="field"><span>Bemerkung</span><textarea id="fBem" placeholder="z. B. Sprosse lose, Dach neu 2026, Zugang von Norden">${esc(f.bemerkung)}</textarea></label>
     </fieldset>`;
   const dirBlock = `<fieldset><legend>Schießbereiche</legend>
-      <p class="hint">Bis zu 3 Bereiche (z. B. vorn auf den Graben, nach links und rechts). „Fächer messen“: Handy flach halten, erst die Oberkante auf den <b>linken</b> Rand des Bereichs richten und tippen, dann auf den <b>rechten</b> Rand.</p>
+      <p class="hint">Bis zu 3 Bereiche (z. B. vorn auf den Graben, nach links und rechts). „Fächer messen“: Handy <b>flach</b> (wie eine Wasserwaage) vor den Bauch halten, mit der Oberkante auf den <b>linken</b> Rand des Bereichs zeigen, warten bis „✓ ruhig“ erscheint und tippen, dann genauso auf den <b>rechten</b> Rand.</p>
       <div id="bxList"></div>
       <button type="button" class="btn secondary small" id="bxAdd">＋ Weiteren Schießbereich</button>
     </fieldset>`;
@@ -1539,11 +1569,13 @@ function openCapture(mode, id) {
         <button type="button" class="slot" id="slotFoto"></button>
         <button type="button" class="slot" id="slotPano"></button>
       </div>
-      <p class="hint">${move ? 'Leer lassen = bisherige Fotos bleiben. Neue Fotos ersetzen die aktuellen, die alten bleiben im Verlauf.' : 'Panorama: in der Kamera-App den Modus „Pano/Panorama“ nehmen und hier aus der Galerie auswählen.'}</p>
+      <p class="hint">${move ? 'Am neuen Standort neu aufnehmen – die alten Fotos wandern in den Verlauf. Geht auch später über „Fotos & Bereiche erfassen“.' : 'Panorama: in der Kamera-App den Modus „Pano/Panorama“ nehmen und hier aus der Galerie auswählen.'}</p>
     </fieldset>`;
+  const umHint = move ? `<div class="umst-box"><b>Umstellen</b>: Fotos und Schießbereiche des alten Standorts wandern in den Verlauf und werden hier neu erfasst (jetzt oder später). Freifläche und Kirrung bleiben. Der Sitz ist bis „Umstellung abschließen“ in Karte und Liste markiert.</div>` : '';
+  const umFinBlock = edit && s?.umstellung ? `<fieldset><legend>Umstellung</legend><label class="check"><input type="checkbox" id="fUmFin"> Umstellung damit abschließen</label></fieldset>` : '';
   const dateBlock = move ? `<fieldset><legend>Umgestellt am</legend><label class="field"><span>Datum</span><input type="date" id="fDatum" value="${f.datum}"></label></fieldset>` : '';
 
-  openSheet(title, posBlock + dataBlock + dirBlock + photoBlock + dateBlock,
+  openSheet(title, umHint + posBlock + dataBlock + dirBlock + photoBlock + dateBlock + umFinBlock,
     `<button class="btn secondary" data-close>Abbrechen</button><button class="btn" id="capSave">Speichern</button>`);
 
   /* --- Fotos --- */
@@ -1562,21 +1594,15 @@ function openCapture(mode, id) {
     }
   };
   const pick = kind => {
-    const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*';
-    if (kind === 'foto') inp.setAttribute('capture', 'environment');
-    inp.onchange = async () => {
-      const file = inp.files[0]; if (!file) return;
+    pickFile('image/*', async file => {
       toast('Bereite Foto vor …', 1500);
       try {
         const p = await prepPhoto(file, kind);
         p.url = URL.createObjectURL(new Blob([p.thumb], { type: 'image/jpeg' }));
         if (kind === 'foto') f.newFoto = p; else f.newPano = p;
         slot(kind);
-      } catch (e) { toast(e.message, 4000); }
-    };
-    // Foto: Auswahl lassen (Kamera oder Galerie) – manche Handys öffnen mit capture sofort die Kamera
-    if (kind === 'foto' && !/iPhone|iPad|Android/i.test(navigator.userAgent)) inp.removeAttribute('capture');
-    inp.click();
+      } catch (e) { toast('Foto konnte nicht übernommen werden: ' + e.message, 5000); }
+    });
   };
   ['foto', 'pano'].forEach(kind => {
     const el = $(kind === 'foto' ? '#slotFoto' : '#slotPano');
@@ -1627,14 +1653,18 @@ function openCapture(mode, id) {
     $('[data-mx]', el)?.addEventListener('click', () => stopCompass());
   };
   const changed = () => { renderBx(); if (miniDir) miniDir(); };
-  const showLive = h => {
+  let liveInfo = null;
+  const showLive = (h, info) => {
+    if (info) liveInfo = info;
     const card = mess && $(`.bx[data-i="${mess.i}"]`); if (!card) return;
     const n = $('.live-needle', card); n.style.display = ''; n.setAttribute('transform', `rotate(${h} 46 46)`);
-    $('.bx-live', card).textContent = `Handy zeigt ${Math.round(h)}° ${dirName(h)}` + (mess.kind === 'fan' && mess.left != null ? ` · linker Rand ${Math.round(mess.left)}°` : '');
+    $('.bx-live', card).innerHTML = `Handy zeigt ${Math.round(h)}° ${dirName(h)}` + (mess.kind === 'fan' && mess.left != null ? ` · linker Rand ${Math.round(mess.left)}°` : '') + `<br><span class="${liveInfo?.ruhig && liveInfo.tilt <= 35 ? 'ok' : ''}">${kompassHinweis(liveInfo)}</span>`;
   };
   async function messen(i, kind) {
     if (mess && mess.i === i && mess.kind === kind && compassStop) {
-      if (live == null) { toast('Noch kein Kompasswert.', 2000); return; }
+      if (live == null) { toast('Kompass startet noch – einen Moment.', 2000); return; }
+      if (liveInfo && liveInfo.tilt > 35) { toast('Handy flacher halten, dann nochmal tippen.', 2500); return; }
+      live = compassStop.mean(800) ?? live; // Mittel der letzten 0,8 s – ruhiger als der Momentwert
       if (kind === 'dir') { f.bereiche[i].r = norm(live); toast(`Richtung ${dirTxt(live)} übernommen`); stopCompass(); return; }
       if (mess.left == null) { mess.left = live; toast(`Linker Rand ${Math.round(live)}° – jetzt auf den rechten Rand zeigen`, 2500); renderBx(); showLive(live); return; }
       const w = Math.min(270, Math.max(10, norm(live - mess.left)));
@@ -1643,7 +1673,8 @@ function openCapture(mode, id) {
     }
     stopCompass();
     mess = { i, kind, left: null }; live = null; renderBx();
-    compassStop = await startCompass(h => { live = h; showLive(h); });
+    liveInfo = null;
+    compassStop = await startCompass((h, info) => { live = h; showLive(h, info); });
     if (!compassStop) { mess = null; renderBx(); }
   }
   function stopCompass() { if (compassStop) { compassStop(); compassStop = null; } mess = null; live = null; changed(); }
@@ -1763,9 +1794,8 @@ function openCapture(mode, id) {
         n = clone(s);
         const datum = $('#fDatum').value || todayISO();
         n.verlauf.unshift({ lat: s.lat, lng: s.lng, acc: s.acc, richtung: s.richtung, bereiche: bereicheOf(s), von: s.seit, bis: datum, foto: s.foto, pano: s.pano });
-        Object.assign(n, { lat: p.lat, lng: p.lng, acc: p.acc ? Math.round(p.acc * 10) / 10 : null, richtung, bereiche, seit: datum, geaendert: now });
-        if (fotoRef) n.foto = fotoRef;
-        if (panoRef) n.pano = panoRef;
+        Object.assign(n, { lat: p.lat, lng: p.lng, acc: p.acc ? Math.round(p.acc * 10) / 10 : null, richtung, bereiche, seit: datum, geaendert: now,
+          foto: fotoRef || null, pano: panoRef || null, umstellung: { seit: datum } });
         msg = `Hochsitz „${s.name}“ umgestellt (${distTxt(distM(s, p))})`;
       } else {
         n = clone(s);
@@ -1776,6 +1806,7 @@ function openCapture(mode, id) {
         Object.assign(n, { name, art: f.art, zustand: f.zustand, bemerkung: f.bemerkung, richtung, bereiche, foto: fotoRef || f.foto, pano: panoRef || f.pano, geaendert: now });
         if (gps.manual || gps.est) Object.assign(n, { lat: p.lat, lng: p.lng, acc: p.acc ? Math.round(p.acc * 10) / 10 : n.acc });
         msg = `Hochsitz „${name}“ bearbeitet`;
+        if (n.umstellung && $('#fUmFin')?.checked) { delete n.umstellung; msg = `Hochsitz „${name}“ – Umstellung abgeschlossen`; }
         cleanup(); sheetCleanup = null;
         closeSheet();
         await enqueue({ t: 'put', sitzId: sid, sitzName: name, sitz: n, files, msg, delFiles: removed });
@@ -1822,28 +1853,49 @@ function stopFollow() {
 }
 
 /* ---------- Kompass ---------- */
+/** Kompass starten. cb(geglätteteRichtung, info) mit info = {acc: Genauigkeit ° (iOS) | null, tilt: Neigung °, ruhig: bool}.
+ *  Die zurückgegebene Stopp-Funktion hat `.mean(ms)` = Mittel der letzten ms (für das Übernehmen) und `.info`. */
 async function startCompass(cb) {
   if (typeof DeviceOrientationEvent === 'undefined') { toast('Dieses Gerät hat keinen Kompass – bitte Richtung antippen.', 3500); return null; }
   if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-    try { if (await DeviceOrientationEvent.requestPermission() !== 'granted') { toast('Kompass nicht erlaubt.', 3000); return null; } }
+    try { if (await DeviceOrientationEvent.requestPermission() !== 'granted') { toast('Kompass nicht erlaubt – in den iPhone-Einstellungen für Safari „Bewegung & Ausrichtung“ erlauben.', 5000); return null; } }
     catch { toast('Kompass nicht erlaubt.', 3000); return null; }
   }
   const angle = () => (screen.orientation && typeof screen.orientation.angle === 'number' ? screen.orientation.angle : (window.orientation || 0));
   let sx = null, sy = null, got = false;
+  const buf = []; // {t, h}
+  const info = { acc: null, tilt: 0, ruhig: false };
+  const circMean = arr => { let x = 0, y = 0; arr.forEach(a => { x += Math.cos(a * Math.PI / 180); y += Math.sin(a * Math.PI / 180); }); return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360; };
   const handler = e => {
     let h = null;
-    if (typeof e.webkitCompassHeading === 'number') h = e.webkitCompassHeading + angle();
+    if (typeof e.webkitCompassHeading === 'number') { h = e.webkitCompassHeading + angle(); info.acc = typeof e.webkitCompassAccuracy === 'number' ? e.webkitCompassAccuracy : null; }
     else if (e.absolute && e.alpha != null) h = 360 - e.alpha + angle();
     if (h == null || Number.isNaN(h)) return;
+    h = ((h % 360) + 360) % 360;
     got = true;
+    info.tilt = Math.max(Math.abs(e.beta || 0), Math.abs(e.gamma || 0));
+    const now = Date.now();
+    buf.push({ t: now, h }); while (buf.length && now - buf[0].t > 1500) buf.shift();
+    const last = buf.filter(x => now - x.t <= 800).map(x => x.h), m = circMean(last);
+    info.ruhig = last.length >= 4 && last.every(x => angDiff(x, m) <= 3);
     const r = h * Math.PI / 180, x = Math.cos(r), y = Math.sin(r);
-    sx = sx == null ? x : sx * 0.75 + x * 0.25; sy = sy == null ? y : sy * 0.75 + y * 0.25;
-    cb((Math.atan2(sy, sx) * 180 / Math.PI + 360) % 360);
+    sx = sx == null ? x : sx * 0.65 + x * 0.35; sy = sy == null ? y : sy * 0.65 + y * 0.35;
+    cb((Math.atan2(sy, sx) * 180 / Math.PI + 360) % 360, info);
   };
   const evt = 'ondeviceorientationabsolute' in window ? 'deviceorientationabsolute' : 'deviceorientation';
   window.addEventListener(evt, handler);
   setTimeout(() => { if (!got) toast('Der Kompass liefert keine Werte – bitte Richtung antippen.', 4000); }, 3000);
-  return () => window.removeEventListener(evt, handler);
+  const stop = () => window.removeEventListener(evt, handler);
+  stop.info = info;
+  stop.mean = (ms = 800) => { const now = Date.now(), a = buf.filter(x => now - x.t <= ms).map(x => x.h); return a.length ? circMean(a) : null; };
+  return stop;
+}
+/** Kurzer Text zum Kompass-Zustand fürs Messen */
+function kompassHinweis(info) {
+  if (!info) return '';
+  if (info.tilt > 35) return '⚠ Handy flacher halten';
+  if (info.acc != null && (info.acc < 0 || info.acc > 25)) return '⚠ Kompass ungenau – Handy einmal in Form einer 8 schwenken';
+  return info.ruhig ? '✓ ruhig – jetzt tippen' : 'kurz ruhig halten …';
 }
 
 /* ================= Salzlecken & Freiflächen (ab 1.1.0) ================= */
@@ -2100,9 +2152,7 @@ function openLeckeCapture(mode, id) {
   };
   $('#lkSlot').onclick = e => {
     if (e.target.closest('.x')) { if (f.newFoto) f.newFoto = null; else f.foto = null; slot(); return; }
-    const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*';
-    inp.onchange = async () => { const file = inp.files[0]; if (!file) return; try { const p = await prepPhoto(file, 'foto'); p.url = URL.createObjectURL(new Blob([p.thumb], { type: 'image/jpeg' })); f.newFoto = p; slot(); } catch (err) { toast(err.message, 4000); } };
-    inp.click();
+    pickFile('image/*', async file => { toast('Bereite Foto vor …', 1500); try { const p = await prepPhoto(file, 'foto'); p.url = URL.createObjectURL(new Blob([p.thumb], { type: 'image/jpeg' })); f.newFoto = p; slot(); } catch (err) { toast('Foto konnte nicht übernommen werden: ' + err.message, 5000); } });
   };
   slot();
   const start = l ? [l.lat, l.lng] : state.me ? [state.me.lat, state.me.lng] : map.getCenter();

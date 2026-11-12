@@ -2,7 +2,7 @@
  * Bei jeder Änderung an App-Dateien VERSION erhöhen → Hinweis „Neue Version“.
  * Kartenkacheln werden beim Ansehen zwischengespeichert (offline im Revier nutzbar).
  */
-const VERSION = 'hs-1.12.0';
+const VERSION = 'hs-1.13.0';
 const TILES = 'hs-tiles-v1';
 const TILE_MAX = 3000;
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest',

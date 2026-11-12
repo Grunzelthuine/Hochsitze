@@ -60,10 +60,16 @@ Eigenständige Test-App (PWA), die später in die App „Jagd Thuine“ einflie�
 - **Fächer messen** mit dem Handy: Oberkante auf den linken Rand des Bereichs richten → tippen, auf den rechten Rand richten → tippen; die App setzt Mitte und Breite. Alternativ „Nur Richtung messen“ oder Richtung/Breite antippen.
 - Wind-Bewertung je Bereich („Bereich SW: von vorn, günstig“ …). Ältere Sitze mit einer Blickrichtung werden als ein Bereich mit 60° übernommen.
 
+## Neu in v1.13.0
+- **Fotos zuverlässiger:** Auswahl hängt im Dokument (iOS verlor sonst manchmal die Auswahl), kein Kamera-Zwang mehr – das iPhone bietet „Foto aufnehmen“, „Mediathek“ oder „Datei“.
+- **Kompass beim Messen:** Hinweise „Handy flacher halten“, „Kompass ungenau – in Form einer 8 schwenken“, „✓ ruhig – jetzt tippen“; übernommen wird der Mittelwert der letzten 0,8 s; schräg gehaltenes Handy wird abgelehnt.
+- **Namen ein/aus:** Knopf „T“ rechts blendet die Hochsitz-Namen auf der Karte aus (gemerkt).
+- **Umstellen neu:** Fotos und Schießbereiche des alten Standorts wandern in den Verlauf, am neuen Standort wird neu erfasst (sofort oder später). Freifläche und Kirrung bleiben. Bis „Umstellung abschließen“ (Detail oder Häkchen beim Bearbeiten) ist der Sitz orange markiert (Karte „!“, Liste „Umstellung offen“).
+
 ## Daten
 - `data/hochsitze.json`: verschlüsselt (AES-GCM, PBKDF2-SHA256 150.000), gleiches Format wie `strecke.json` in Jagd Thuine.
 - `data/fotos/*.bin`: verschlüsselte JPEGs (Format „SBE1“ wie die Dokumente in Jagd Thuine), jeweils mit Vorschaubild `-t.bin`.
-- Modell: `sitze: [{id, name, art (kanzel|leiter|drueckjagd|erdsitz|sonst), zustand (gut|maengel|gesperrt), bemerkung, lat, lng, acc, richtung (Grad|null, = erster Bereich), bereiche: [{r: Grad, b: Fächerbreite}] (max. 3), foto {f,t,w,h}, pano {f,t,w,h}, seit, erstellt, geaendert, verlauf: [{lat, lng, acc, richtung, von, bis, foto, pano}], flaeche: {pts: [[lat,lng]…], m2, datum} | null, kirrung: {lat, lng, datum} | null}]`.
+- Modell: `sitze: [{id, name, art (kanzel|leiter|drueckjagd|erdsitz|sonst), zustand (gut|maengel|gesperrt), bemerkung, lat, lng, acc, richtung (Grad|null, = erster Bereich), bereiche: [{r: Grad, b: Fächerbreite}] (max. 3), umstellung: {seit} | fehlt, foto {f,t,w,h}, pano {f,t,w,h}, seit, erstellt, geaendert, verlauf: [{lat, lng, acc, richtung, von, bis, foto, pano}], flaeche: {pts: [[lat,lng]…], m2, datum} | null, kirrung: {lat, lng, datum} | null}]`.
 - `lecken: [{id, name, bemerkung, lat, lng, acc, foto, erstellt, geaendert, wartung: [{id, datum, art (bestueckt|kontrolliert|repariert), notiz, zeit}]}]`.
 
 ## Zugang
