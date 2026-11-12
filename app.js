@@ -7,7 +7,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.13.0';
+const APP_VERSION = '1.13.1';
 const LS_CFG = 'hs.cfg.v1';
 const LS_DATA = 'hs.data.v1';
 const LS_PW = 'hs.pw.v1';
@@ -504,6 +504,8 @@ function initMap() {
     setLayer(keys[(keys.indexOf(state.view.layer) + 1) % keys.length]);
   };
   $('#histBtn').onclick = () => toggleHist();
+  $('#scentBtn').onclick = () => setScent(!state.view.scent);
+  $('#scentBtn').classList.toggle('on', !!state.view.scent);
   const labels = () => { $('#map').classList.toggle('no-labels', !state.view.labels); $('#labelBtn').classList.toggle('on', !!state.view.labels); };
   $('#labelBtn').onclick = () => { state.view.labels = !state.view.labels; saveView(); labels(); toast(state.view.labels ? 'Namen werden angezeigt' : 'Namen ausgeblendet', 1400); };
   labels();
@@ -812,7 +814,7 @@ function openWind() {
     : '<p class="hint">Noch keine Winddaten – bitte Internetverbindung prüfen.</p>';
   openSheet('Wind', body, `<button class="btn secondary" id="windReload">Aktualisieren</button>`);
   $('#windReload').onclick = async () => { await loadWind(true); openWind(); };
-  $('#scentChk')?.addEventListener('change', e => { state.view.scent = e.target.checked; saveView(); drawScent(); });
+  $('#scentChk')?.addEventListener('change', e => setScent(e.target.checked, true));
 }
 
 
@@ -852,6 +854,11 @@ function scentWarn(s) {
     if (inScent(s, c, sh) || share >= 0.5) hits.push('die Freifläche');
   }
   return hits.length ? `Witterung zieht über ${hits.join(' und ')}` : '';
+}
+function setScent(on, still) {
+  state.view.scent = !!on; saveView(); drawScent();
+  $('#scentBtn')?.classList.toggle('on', state.view.scent);
+  if (!still) toast(state.view.scent ? 'Witterungsfahnen eingeblendet' : 'Witterungsfahnen ausgeblendet', 1400);
 }
 function drawScent() {
   if (!scentLayer) return;

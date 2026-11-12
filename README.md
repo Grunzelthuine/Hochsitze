@@ -66,6 +66,9 @@ Eigenständige Test-App (PWA), die später in die App „Jagd Thuine“ einflie�
 - **Namen ein/aus:** Knopf „T“ rechts blendet die Hochsitz-Namen auf der Karte aus (gemerkt).
 - **Umstellen neu:** Fotos und Schießbereiche des alten Standorts wandern in den Verlauf, am neuen Standort wird neu erfasst (sofort oder später). Freifläche und Kirrung bleiben. Bis „Umstellung abschließen“ (Detail oder Häkchen beim Bearbeiten) ist der Sitz orange markiert (Karte „!“, Liste „Umstellung offen“).
 
+## Neu in v1.13.1
+- Eigener Kartenknopf für die **Witterungsfahnen** (Punkt mit gestricheltem Kegel, über dem Wind-Knopf); grün = an. Das Häkchen im Wind-Fenster bleibt und ist synchron.
+
 ## Daten
 - `data/hochsitze.json`: verschlüsselt (AES-GCM, PBKDF2-SHA256 150.000), gleiches Format wie `strecke.json` in Jagd Thuine.
 - `data/fotos/*.bin`: verschlüsselte JPEGs (Format „SBE1“ wie die Dokumente in Jagd Thuine), jeweils mit Vorschaubild `-t.bin`.
