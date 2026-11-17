@@ -20,6 +20,9 @@
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --tabbar-h: 62px;
   --top-h: 61px;
+  /* Mindesthöhe der Kopfzeile aus CSS (falls die Messung nach dem Aufwachen aus dem Hintergrund zu klein ist) */
+  --top-min: calc(env(safe-area-inset-top, 0px) + 61px);
+  --top: max(var(--top-h), var(--top-min));
   color-scheme: light;
 }
 * { box-sizing: border-box; }
@@ -40,7 +43,7 @@ button { cursor: pointer; }
   position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
   display: flex; align-items: center; gap: 8px;
   padding: calc(env(safe-area-inset-top, 0px) + 8px) 12px 8px;
-  background: rgba(227, 229, 204, .95); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  background: #e3e5cc; /* deckend, ohne Weichzeichner (iOS-Darstellungsfehler) */
   border-bottom: 1px solid var(--line);
 }
 .topbar-logo { width: 44px; height: 44px; flex: none; }
@@ -53,13 +56,13 @@ button { cursor: pointer; }
 .icon-btn.spin svg { animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.banner { position: fixed; left: 12px; right: 12px; top: calc(var(--top-h) + 8px); z-index: 1001; padding: 9px 12px; border-radius: 12px; font-size: 13.5px; background: var(--brass-soft); border: 1px solid #d8c48f; color: #4d3d12; box-shadow: var(--shadow); display: flex; gap: 10px; align-items: center; }
+.banner { position: fixed; left: 12px; right: 12px; top: calc(var(--top) + 8px); z-index: 1001; padding: 9px 12px; border-radius: 12px; font-size: 13.5px; background: var(--brass-soft); border: 1px solid #d8c48f; color: #4d3d12; box-shadow: var(--shadow); display: flex; gap: 10px; align-items: center; }
 .banner.err { background: var(--warn-soft); border-color: #e3bc9a; color: #5a2c10; }
 .banner .btn { min-height: 34px; padding: 5px 12px; font-size: 13px; margin-left: auto; }
 
 /* ---------- Ansichten ---------- */
-main { padding-top: var(--top-h); }
-#view-karte { position: fixed; left: 0; right: 0; top: var(--top-h); bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px)); }
+main { padding-top: var(--top); }
+#view-karte { position: fixed; left: 0; right: 0; top: var(--top); bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px)); }
 .map { position: absolute; inset: 0; background: var(--bg-deep); }
 #view-liste { max-width: 760px; margin: 0 auto; padding: 14px 16px calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px) + 20px); }
 #view-liste > * + * { margin-top: 12px; }
@@ -80,7 +83,8 @@ h2.section { font: 600 17px/1.2 var(--serif); color: var(--green); margin: 18px 
 .map-btn.on { background: var(--green); color: #f4f1de; border-color: var(--green); }
 .map-btn.follow { background: #1c5fbf; color: #fff; border-color: #1c5fbf; }
 .fab { position: absolute; z-index: 500; left: 50%; transform: translateX(-50%); bottom: 16px; display: inline-flex; align-items: center; gap: 8px; min-height: 50px; padding: 10px 20px 10px 14px; border-radius: 25px; border: 0; background: var(--green); color: #f4f1de; font-weight: 700; font-size: 15.5px; box-shadow: 0 4px 16px rgba(0,0,0,.3); white-space: nowrap; }
-.fab-plus { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 15px; background: #f4f1de; color: var(--green); font-size: 22px; line-height: 1; }
+.fab-plus { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 15px; background: #f4f1de; color: var(--green); flex: none; }
+.fab-plus svg { display: block; }
 .layer-name { position: absolute; z-index: 500; top: 12px; left: 50%; transform: translateX(-50%); padding: 6px 14px; border-radius: 999px; background: rgba(34, 48, 29, .85); color: #f4f1de; font-size: 13px; font-weight: 600; pointer-events: none; }
 .leaflet-container { font-family: var(--sans); }
 .leaflet-control-attribution { font-size: 10px; background: rgba(242,240,223,.8) !important; }
@@ -203,7 +207,7 @@ legend { font: 600 15px var(--serif); color: var(--green); padding: 0 6px; }
 .legend i { width: 12px; height: 12px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px var(--line); }
 
 /* ---------- Tabbar ---------- */
-.tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 1000; display: flex; gap: 4px; padding: 6px 12px calc(env(safe-area-inset-bottom, 0px) + 6px); background: rgba(227, 229, 204, .96); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-top: 1px solid var(--line); height: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px)); }
+.tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 1000; display: flex; gap: 4px; padding: 6px 12px calc(env(safe-area-inset-bottom, 0px) + 6px); background: #e3e5cc; border-top: 1px solid var(--line); height: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px)); }
 .tab { flex: 1 1 0; display: grid; justify-items: center; align-content: center; gap: 2px; border: 0; background: none; color: var(--muted); font-size: 11.5px; font-weight: 600; border-radius: 10px; }
 .tab svg { width: 24px; height: 24px; }
 .tab.active { color: var(--green); background: var(--green-soft); }
@@ -214,7 +218,10 @@ legend { font: 600 15px var(--serif); color: var(--green); padding: 0 6px; }
 .sheet-panel { position: relative; width: 100%; max-width: 760px; max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 12px); display: flex; flex-direction: column; background: var(--bg); border-radius: 18px 18px 0 0; box-shadow: 0 -6px 30px rgba(0,0,0,.2); animation: up .22s ease-out; }
 @keyframes up { from { transform: translateY(24px); opacity: .4; } to { transform: none; opacity: 1; } }
 .sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 16px 10px; border-bottom: 1px solid var(--line); }
-.sheet-head h2 { margin: 0; font: 600 19px/1.2 var(--serif); color: var(--green); min-width: 0; overflow-wrap: anywhere; }
+.zurueck-btn { flex: none; display: inline-flex; align-items: center; gap: 4px; min-height: 42px; padding: 0 16px 0 10px; border-radius: 99px; border: 1px solid var(--line); background: var(--green-soft); color: var(--green); font: 600 16px/1 var(--sans); }
+.zurueck-btn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.zurueck-btn:active { filter: brightness(.94); }
+.sheet-head h2 { flex: 1; margin: 0; font: 600 19px/1.2 var(--serif); color: var(--green); min-width: 0; overflow-wrap: anywhere; }
 .sheet-body { overflow-y: auto; padding: 14px 16px; -webkit-overflow-scrolling: touch; }
 .sheet-body > * + * { margin-top: 12px; }
 .sheet-foot { padding: 10px 16px calc(env(safe-area-inset-bottom, 0px) + 12px); border-top: 1px solid var(--line); display: flex; gap: 10px; }
@@ -227,7 +234,9 @@ legend { font: 600 15px var(--serif); color: var(--green); padding: 0 6px; }
 
 /* ---------- Bild-Betrachter ---------- */
 .viewer { position: fixed; inset: 0; z-index: 1200; background: #0d110b; display: flex; flex-direction: column; }
-.viewer-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: calc(env(safe-area-inset-top, 0px) + 8px) 12px 8px 16px; color: #f4f1de; font-weight: 600; }
+.viewer-bar { display: flex; align-items: center; gap: 12px; padding: calc(env(safe-area-inset-top, 0px) + 8px) 16px 10px 12px; color: #f4f1de; font-weight: 600; }
+#viewerTitle { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zurueck-btn.hell { background: #f4f1de; border-color: #f4f1de; color: var(--green); }
 .viewer-body { flex: 1; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch; display: flex; align-items: center; justify-content: center; touch-action: pan-x pan-y pinch-zoom; }
 .viewer-body img.photo { max-width: 100%; max-height: 100%; object-fit: contain; }
 .viewer-body.pano { justify-content: flex-start; overflow-x: auto; overflow-y: hidden; cursor: grab; padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 40px); }
@@ -255,6 +264,7 @@ legend { font: 600 15px var(--serif); color: var(--green); padding: 0 6px; }
 @media (max-width: 400px) {
   .eyebrow { display: none; }
   .topbar-logo { width: 38px; height: 38px; }
+  :root { --top-min: calc(env(safe-area-inset-top, 0px) + 55px); }
 
 }
 .map.z-lo .hs-label { display: none; }
@@ -403,3 +413,9 @@ legend { font: 600 15px var(--serif); color: var(--green); padding: 0 6px; }
 .umst-box li { color: #8a4500; }
 .umst-box li.ok { color: var(--green); }
 .bx-live .ok { color: var(--green); }
+
+/* 1.12.7 Salzlecke leer gemeldet */
+.hs-pin.lk.leer { box-shadow: 0 0 0 3px #b3261e, 0 1px 4px rgba(0,0,0,.45); }
+.hs-pin.lk.leer::before { content: '!'; position: absolute; left: -7px; top: -7px; width: 14px; height: 14px; border-radius: 50%; background: #b3261e; color: #fff; font: 700 10px/14px sans-serif; text-align: center; border: 1.5px solid #fff; }
+.lk-leer { margin-top: 8px; padding: 6px 10px; border-radius: 10px; background: var(--warn-soft, #f6dcd6); color: var(--warn); font-weight: 600; font-size: 14px; }
+.hist li i.w-leer { background: #b3261e; border-color: #b3261e; }

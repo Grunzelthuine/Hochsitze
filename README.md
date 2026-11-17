@@ -4,6 +4,13 @@ Eigenständige Test-App (PWA), die später in die App „Jagd Thuine“ einflie�
 
 **Link:** https://grunzelthuine.github.io/Hochsitze/
 
+## Neu ab 1.15.0: Konten und Benachrichtigungen
+
+- Anmeldung mit eigenem Konto (gleicher Konten-Server wie „Jagd Thuine“, `config.js` → `api`). Rechte je Person: Zustand ändern bzw. Mangel melden, Salzlecken abhaken, Salzlecke leer melden.
+- Benachrichtigungen bei „Salzlecke leer“ und Hochsitz-Mängeln an die eingetragenen Zuständigen.
+- Für Nicht-Admins vereinfachte Ansicht (keine Koordinaten oder Standort-Verlauf), große „‹ Zurück“-Knöpfe.
+- Später `nurKonto: true` in `config.js`: dann gibt es kein Passwort-Feld mehr, nur noch die Anmeldung mit Konto.
+
 ## Funktionen (v1.0.0)
 - Karte mit allen Hochsitzen: Luftbild (Esri), topografische Karte (BKG TopPlusOpen), OpenStreetMap. Symbol je Art, gelber Kegel = Blickrichtung, Ring gelb = Mängel, rot = gesperrt.
 - Erfassen am Sitz (nur voller Zugang): GPS wird laufend gemessen und gemittelt (Genauigkeit sichtbar), Punkt von Hand verschiebbar. Name, Art, Zustand, Bemerkung, Blickrichtung (Kompass oder antippen), Foto und Handy-Panorama.

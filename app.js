@@ -7,7 +7,10 @@
  */
 'use strict';
 
-const APP_VERSION = '1.13.2';
+const APP_VERSION = '1.15.0';
+/* Einstellungen je Installation (config.js): Konten-Server, Test-Umgebung */
+const CONF = self.JAGD_CFG || {};
+const LSP = CONF.lsPrefix || '';
 const LS_CFG = 'hs.cfg.v1';
 const LS_DATA = 'hs.data.v1';
 const LS_PW = 'hs.pw.v1';
@@ -27,7 +30,7 @@ const ARTEN = {
 };
 const LECKE = { name: 'Salzlecke', color: '#3c6e8f', icon: '<path d="M6.5 6.5h11v6h-11Z"/><path d="M12 12.5V21M9 21h6"/>' };
 const KIRR_ICON = '<circle cx="12" cy="12" r="6.5"/><circle cx="10" cy="10.5" r="1" fill="currentColor"/><circle cx="14" cy="11" r="1" fill="currentColor"/><circle cx="11.5" cy="14" r="1" fill="currentColor"/>';
-const WARTUNG = { bestueckt: 'Bestückt', kontrolliert: 'Kontrolliert', repariert: 'Repariert' };
+const WARTUNG = { bestueckt: 'Bestückt', kontrolliert: 'Kontrolliert', repariert: 'Repariert', leer: 'Leer gemeldet' };
 const ZUSTAND = { gut: 'In Ordnung', maengel: 'Mängel', gesperrt: 'Gesperrt' };
 const DIRS = ['N', 'NO', 'O', 'SO', 'S', 'SW', 'W', 'NW'];
 const LAYERS = {
@@ -42,8 +45,8 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const clone = o => JSON.parse(JSON.stringify(o));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-function lsGet(key, fallback) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; } }
-function lsSet(key, val) { try { val === undefined ? localStorage.removeItem(key) : localStorage.setItem(key, JSON.stringify(val)); } catch { /* egal */ } }
+function lsGet(key, fallback) { try { const v = localStorage.getItem(LSP + key); return v ? JSON.parse(v) : fallback; } catch { return fallback; } }
+function lsSet(key, val) { try { val === undefined ? localStorage.removeItem(LSP + key) : localStorage.setItem(LSP + key, JSON.stringify(val)); } catch { /* egal */ } }
 function todayISO() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
 function dateDE(iso) {
   if (!iso) return '–';
@@ -129,7 +132,7 @@ async function decryptBytes(b, pws = [state.pw]) {
 let dbP = null;
 function db() {
   if (!dbP) dbP = new Promise((res, rej) => {
-    const r = indexedDB.open('hochsitze', 1);
+    const r = indexedDB.open(LSP + 'hochsitze', 1);
     r.onupgradeneeded = () => r.result.createObjectStore('kv');
     r.onsuccess = () => res(r.result);
     r.onerror = () => rej(r.error);
@@ -159,6 +162,8 @@ function defaultCfg() {
     owner = location.hostname.split('.')[0];
     repo = location.pathname.split('/').filter(Boolean)[0] || `${owner}.github.io`;
   }
+  if (CONF.owner) owner = CONF.owner;
+  if (CONF.repo) repo = CONF.repo;
   return { owner, repo, branch: 'main', token: '', mode: '' };
 }
 const state = {
@@ -173,10 +178,19 @@ const state = {
   me: null,              // {lat, lng, acc}
   loaded: false,
 };
-if (state.cfg.mode !== 'voll' && location.hostname.endsWith('.github.io')) {
+// In der Test-Umgebung immer das Test-Repo (nie versehentlich in die echten Daten schreiben)
+if ((state.cfg.mode !== 'voll' && location.hostname.endsWith('.github.io')) || CONF.test) {
   const d = defaultCfg(); Object.assign(state.cfg, { owner: d.owner, repo: d.repo });
 }
-const isAdmin = () => !!(state.cfg.mode === 'voll' && state.cfg.token && state.cfg.owner && state.cfg.repo);
+/* Zugang: GitHub-Token auf dem Gerät (bisher) ODER Konto beim Konten-Server */
+const tokenAdmin = () => !CONF.nurKonto && !!(state.cfg.mode === 'voll' && state.cfg.token && state.cfg.owner && state.cfg.repo);
+const viaKonto = () => !tokenAdmin() && !!window.Konto?.hatZugang();
+const isAdmin = () => tokenAdmin() || !!(window.Konto?.isAdmin() && state.cfg.owner && state.cfg.repo);
+/** Einzelrechte (vom Admin je Person freigegeben) */
+const canZustand = () => isAdmin() || !!window.Konto?.can('zustand');
+const canLecke = () => isAdmin() || !!window.Konto?.can('lecke');
+const canLeerMelden = () => canLecke() || !!window.Konto?.can('leer');
+const canWrite = () => isAdmin() || canZustand() || canLecke() || canLeerMelden();
 const saveCfg = () => lsSet(LS_CFG, state.cfg);
 const saveView = () => lsSet(LS_VIEW, state.view);
 const sitzById = id => state.data.sitze.find(s => s.id === id);
@@ -211,15 +225,21 @@ function rebuild() {
 }
 
 /* ================= GitHub ================= */
+const ghBase = () => viaKonto() ? Konto.ghBase() : 'https://api.github.com';
 function ghHeaders(auth, raw = false) {
   const h = { Accept: raw ? 'application/vnd.github.raw+json' : 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
-  if (auth && state.cfg.token) h.Authorization = `Bearer ${state.cfg.token}`;
+  if (viaKonto()) h.Authorization = `Bearer ${Konto.token()}`;
+  else if (auth && state.cfg.token) h.Authorization = `Bearer ${state.cfg.token}`;
   return h;
 }
+/** Pfad im Repo (Test-Umgebung: Unterordner, z. B. „hochsitze/“) */
+const repoPath = path => CONF.base && !path.startsWith(CONF.base) ? CONF.base + path : path;
 function ghUrl(path, ref = true) {
   const { owner, repo, branch } = state.cfg;
-  return `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${path.split('/').map(encodeURIComponent).join('/')}` + (ref ? `?ref=${encodeURIComponent(branch || 'main')}` : '');
+  return `${ghBase()}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${repoPath(path).split('/').map(encodeURIComponent).join('/')}` + (ref ? `?ref=${encodeURIComponent(branch || 'main')}` : '');
 }
+/** Fehlermeldung des Konten-Servers lesen (z. B. „Dafür fehlt dir das Recht“) */
+async function serverFehler(r, fallback) { try { const j = await r.clone().json(); return j.fehler || j.message || fallback; } catch { return fallback; } }
 /** Liest die Datendatei. Ergebnis: {raw} (null = Datei gibt es noch nicht) – wirft bei Netzfehler. */
 async function fetchRemoteRaw() {
   const { owner, repo } = state.cfg;
@@ -228,7 +248,7 @@ async function fetchRemoteRaw() {
       const r = await fetch(ghUrl(DATA_PATH) + `&t=${Date.now()}`, { headers: ghHeaders(true, true), cache: 'no-store' });
       if (r.ok) return { raw: JSON.parse(await r.text()) };
       if (r.status === 404) return { raw: null };
-      if (r.status === 401) toast('GitHub-Token ungültig – bitte in den Einstellungen prüfen.', 5000);
+      if (r.status === 401 && !viaKonto()) toast('GitHub-Token ungültig – bitte in den Einstellungen prüfen.', 5000);
     } catch { /* weiter mit Pages */ }
   }
   const r = await fetch(`${DATA_PATH}?t=${Date.now()}`, { cache: 'no-store' });
@@ -246,7 +266,7 @@ async function getSha(path) {
   const r = await fetch(ghUrl(path) + `&t=${Date.now()}`, { headers: ghHeaders(true), cache: 'no-store' });
   if (r.ok) return (await r.json()).sha;
   if (r.status === 404) return undefined;
-  if (r.status === 401 || r.status === 403) throw new Error('Keine Rechte – Token prüfen');
+  if (r.status === 401 || r.status === 403) throw new Error(viaKonto() ? await serverFehler(r, 'Keine Rechte') : 'Keine Rechte – Token prüfen');
   throw new Error(`GitHub ${r.status}`);
 }
 async function putFile(path, b64, message, sha) {
@@ -272,9 +292,18 @@ async function load({ quiet = false } = {}) {
     state.remote = normalize(data); state.remoteEnc = enc;
     $('#lock').hidden = true;
     rebuild(); state.loaded = true; render();
-    if (state.queue.length && isAdmin()) flush();
+    if (state.queue.length && canWrite()) flush();
   } catch (e) {
-    if (e instanceof NeedPassword) { showLock(e.message); return; }
+    if (e instanceof NeedPassword) {
+      // Angemeldetes Konto: aktuelles Passwort vom Server holen (z. B. nach Passwortwechsel)
+      if (window.Konto?.loggedIn() && Date.now() - (load._kt || 0) > 60e3) {
+        load._kt = Date.now();
+        const vorher = state.pw;
+        await Konto.refresh();
+        if (state.pw && state.pw !== vorher) return;
+      }
+      showLock(e.message); return;
+    }
     if (!quiet) toast(state.loaded ? 'Offline – zeige zuletzt geladenen Stand.' : 'Keine Verbindung – zeige gespeicherten Stand.', 3500);
   } finally { btn.classList.remove('spin'); }
 }
@@ -297,7 +326,7 @@ async function enqueue(op) {
 let flushing = false;
 async function flush() {
   if (flushing || !state.queue.length) { updateBanner(); return; }
-  if (!isAdmin()) { updateBanner(); return; }
+  if (!canWrite()) { updateBanner(); return; }
   if (!state.pw) { updateBanner(); return; }
   flushing = true; updateBanner('Speichere …');
   const batch = [...state.queue];
@@ -311,7 +340,7 @@ async function flush() {
         if (bin) {
           updateBanner(`Lade Fotos hoch … ${++n}/${total}`);
           const r = await putFile(p, bytesToB64(bin), `Foto ${op.sitzName || ''}`.trim());
-          if (!r.ok && r.status !== 422) throw new Error(r.status === 401 || r.status === 403 ? 'Keine Schreibrechte (Token prüfen)' : `Foto-Upload fehlgeschlagen (GitHub ${r.status})`);
+          if (!r.ok && r.status !== 422) throw new Error(r.status === 401 || r.status === 403 ? (viaKonto() ? await serverFehler(r, 'Keine Schreibrechte') : 'Keine Schreibrechte (Token prüfen)') : `Foto-Upload fehlgeschlagen (GitHub ${r.status})`);
         }
         op.done.push(p); await saveQueue();
       }
@@ -330,7 +359,7 @@ async function flush() {
       const r = await putFile(DATA_PATH, b64encodeUtf8(body), msg, sha);
       if (r.ok) ok = true;
       else if (r.status === 409 || r.status === 422) continue;
-      else throw new Error(r.status === 401 || r.status === 403 ? 'Keine Schreibrechte (Token prüfen)' : `GitHub ${r.status}`);
+      else throw new Error(r.status === 401 || r.status === 403 ? (viaKonto() ? await serverFehler(r, 'Keine Schreibrechte') : 'Keine Schreibrechte (Token prüfen)') : `GitHub ${r.status}`);
     }
     if (!ok) throw new Error('Konflikt beim Speichern');
     // 3) Aufräumen
@@ -341,6 +370,8 @@ async function flush() {
     rebuild(); render();
     toast('Gespeichert ✓ – für alle sichtbar.');
     for (const op of batch) for (const p of op.delFiles || []) deleteFile(p, 'Foto entfernt');
+    // Benachrichtigung an die Zuständigen (z. B. Salzlecke leer) – erst nach erfolgreichem Hochladen
+    for (const op of batch) if (op.hinweis) window.Konto?.hinweis(op.hinweis);
   } catch (e) {
     if (e instanceof NeedPassword) { updateBanner(null, 'Passwort passt nicht zur Datei auf GitHub – bitte in den Einstellungen prüfen.'); return; }
     updateBanner(null, navigator.onLine === false ? 'Kein Netz' : e.message);
@@ -354,11 +385,11 @@ function updateBanner(busy, err) {
   const n = state.queue.length;
   if (busy) { b.className = 'banner'; b.innerHTML = `<span>⏳ ${esc(busy)}</span>`; b.hidden = false; return; }
   if (!n) { b.hidden = true; return; }
-  const why = !isAdmin() ? 'Kein Schreibzugang auf diesem Gerät' : !state.pw ? 'Passwort fehlt' : err || 'Wartet auf Netz';
+  const why = !canWrite() ? 'Kein Schreibzugang auf diesem Gerät' : !state.pw ? 'Passwort fehlt' : err || 'Wartet auf Netz';
   b.className = 'banner' + (err ? ' err' : '');
   b.innerHTML = `<span>📤 ${n} ${n === 1 ? 'Änderung' : 'Änderungen'} noch nicht hochgeladen · ${esc(why)}</span><button class="btn small" id="retryBtn">Jetzt senden</button>`;
   b.hidden = false;
-  $('#retryBtn').onclick = () => { if (!state.pw && isAdmin()) openPwSheet(); else flush(); };
+  $('#retryBtn').onclick = () => { if (!state.pw && canWrite()) openPwSheet(); else flush(); };
 }
 
 /* ================= Fotos ================= */
@@ -369,8 +400,8 @@ async function fetchBin(path) {
   if (cached) return cached;
   const { owner, repo, branch } = state.cfg;
   const tries = [() => fetch(path, { cache: 'force-cache' })];
-  if (isAdmin()) tries.push(() => fetch(ghUrl(path) + `&t=${Date.now()}`, { headers: ghHeaders(true, true), cache: 'no-store' }));
-  if (owner && repo) tries.push(() => fetch(`https://raw.githubusercontent.com/${owner}/${repo}/${branch || 'main'}/${path}`));
+  if (isAdmin() || viaKonto()) tries.push(() => fetch(ghUrl(path) + `&t=${Date.now()}`, { headers: ghHeaders(true, true), cache: 'no-store' }));
+  if (owner && repo) tries.push(() => fetch(`https://raw.githubusercontent.com/${owner}/${repo}/${branch || 'main'}/${repoPath(path)}`));
   for (const t of tries) {
     try {
       const r = await t();
@@ -592,7 +623,7 @@ function renderMap() {
     }
   }
   for (const l of state.data.lecken) {
-    const m = L.marker([l.lat, l.lng], { icon: leckeIcon(pend.has(l.id)), title: l.name });
+    const m = L.marker([l.lat, l.lng], { icon: leckeIcon(pend.has(l.id), !!leerGemeldet(l)), title: leerGemeldet(l) ? `${l.name} – leer gemeldet` : l.name });
     m.bindTooltip(esc(l.name), { permanent: true, direction: 'bottom', className: 'hs-label', offset: [0, 4] });
     m.on('click', e => pick(e, () => openLecke(l.id), l.name));
     sitzLayer.addLayer(m);
@@ -1361,7 +1392,7 @@ function openSheet(title, body, foot = '', { overLock = false } = {}) {
   if ($('#sheet').hidden) history.pushState({ hs: 'sheet' }, '');
   $('#sheetTitle').textContent = title;
   $('#sheetBody').innerHTML = body;
-  $('#sheetFoot').innerHTML = foot;
+  $('#sheetFoot').innerHTML = foot || '<button class="btn secondary block" data-close>Zurück</button>';
   $('#sheet').hidden = false;
   flowCheck();
   $('#sheet').style.zIndex = overLock ? 1160 : '';
@@ -1424,6 +1455,7 @@ function openDetail(id) {
   const pend = pendingIds().has(id);
   const a = artOf(s);
   const me = state.me;
+  const adm = isAdmin();
   const fotoOld = v => v.foto && (!s.foto || v.foto.f !== s.foto.f);
   const panoOld = v => v.pano && (!s.pano || v.pano.f !== s.pano.f);
   const um = s.umstellung, okI = b => b ? '✓' : '–';
@@ -1439,20 +1471,21 @@ function openDetail(id) {
       ${pend ? '<span class="badge wait">noch nicht hochgeladen</span>' : ''}
     </div>
     ${s.bemerkung ? `<div class="note">${esc(s.bemerkung)}</div>` : ''}
+    ${adm && s.zustand !== 'gut' ? '<button class="btn secondary block" id="detBehoben">✓ Mangel behoben</button>' : ''}
     <dl class="facts">
-      <dt>${bereicheOf(s).length > 1 ? 'Schießbereiche' : 'Schießbereich'}</dt><dd>${bereicheOf(s).length ? bereicheOf(s).map(bereichTxt).join('<br>') : 'nicht angegeben'}</dd>
+      ${adm ? `<dt>${bereicheOf(s).length > 1 ? 'Schießbereiche' : 'Schießbereich'}</dt><dd>${bereicheOf(s).length ? bereicheOf(s).map(bereichTxt).join('<br>') : 'nicht angegeben'}</dd>` : ''}
       ${windFuerSitz(s) ? `<dt>Wind jetzt</dt><dd>${windFuerSitz(s)}</dd>` : ''}
       ${me ? `<dt>Entfernung</dt><dd>${distM(me, s) <= Math.max(10, me.acc || 0) ? 'Du bist am Sitz' : `${distTxt(distM(me, s))} Richtung ${dirName(bearing(me, s))}`}</dd>` : ''}
-      <dt>Steht hier seit</dt><dd>${dateDE(s.seit)}</dd>
+      ${adm ? `<dt>Steht hier seit</dt><dd>${dateDE(s.seit)}</dd>
       <dt>Koordinaten</dt><dd>${coordTxt(s)}${s.acc ? ` <span class="sub">(±${Math.round(s.acc)} m)</span>` : ''}</dd>
-      <dt>Geändert</dt><dd>${dtDE(s.geaendert)}</dd>
+      <dt>Geändert</dt><dd>${dtDE(s.geaendert)}</dd>` : ''}
     </dl>
     <div class="btn-row">
       <button class="btn secondary small" id="detMap">📍 Auf Karte zeigen</button>
-      <button class="btn secondary small" id="detCopy">Koordinaten kopieren</button>
+      ${adm ? '<button class="btn secondary small" id="detCopy">Koordinaten kopieren</button>' : ''}
     </div>
     ${flaecheSection(s)}
-    ${s.verlauf.length ? `<h2 class="section">Standorte (${s.verlauf.length + 1})</h2>
+    ${adm && s.verlauf.length ? `<h2 class="section">Standorte (${s.verlauf.length + 1})</h2>
     <div class="card pad"><ul class="hist">
       <li class="cur"><i></i><div><b>Aktuell</b> · seit ${dateDE(s.seit)}<small>${coordTxt(s)}</small></div></li>
       ${s.verlauf.map((v, i) => `<li><i></i><div><b>${dateDE(v.von)} – ${dateDE(v.bis)}</b><small>${distTxt(distM(v, s))} vom heutigen Standort · ${coordTxt(v)}</small>
@@ -1464,14 +1497,17 @@ function openDetail(id) {
         </div></div></li>`).join('')}
     </ul></div>` : ''}
     ${isAdmin() ? '<button class="btn danger block" id="detDel" style="margin-top:22px">Hochsitz löschen</button>' : ''}`;
-  const foot = isAdmin() ? `<button class="btn secondary" id="detEdit">Bearbeiten</button><button class="btn" id="detMove">⇄ Umstellen</button>` : '';
+  const mangel = s.zustand !== 'gut';
+  const foot = isAdmin() ? `<button class="btn secondary" id="detEdit">Bearbeiten</button><button class="btn" id="detMove">⇄ Umstellen</button>`
+    : canZustand() ? (mangel ? '<button class="btn secondary" id="detZustand">Mangel ändern</button><button class="btn" id="detBehoben">✓ Mangel behoben</button>'
+      : '<button class="btn" id="detZustand">⚠ Mangel melden</button>') : '';
   openSheet(s.name, body, foot);
   const root = $('#sheet');
   hydrateImages(root);
   $('#detFoto')?.addEventListener('click', () => openViewer(s.foto.f, s.name));
   $('#detPano')?.addEventListener('click', () => openViewer(s.pano.f, `${s.name} · Panorama`, true));
   $('#detMap').onclick = () => { closeSheet(); focusSitz(s); };
-  $('#detCopy').onclick = async () => { try { await navigator.clipboard.writeText(coordTxt(s)); toast('Koordinaten kopiert'); } catch { toast(coordTxt(s), 5000); } };
+  if ($('#detCopy')) $('#detCopy').onclick = async () => { try { await navigator.clipboard.writeText(coordTxt(s)); toast('Koordinaten kopiert'); } catch { toast(coordTxt(s), 5000); } };
   $$('[data-hfoto]', root).forEach(b => b.onclick = () => openViewer(s.verlauf[b.dataset.hfoto].foto.f, `${s.name} · bis ${dateDE(s.verlauf[b.dataset.hfoto].bis)}`));
   $$('[data-hpano]', root).forEach(b => b.onclick = () => openViewer(s.verlauf[b.dataset.hpano].pano.f, `${s.name} · Panorama bis ${dateDE(s.verlauf[b.dataset.hpano].bis)}`, true));
   $$('[data-hmap]', root).forEach(b => b.onclick = () => {
@@ -1479,21 +1515,24 @@ function openDetail(id) {
     switchTab('karte'); zeigeAltenStandort(s, v); setTimeout(() => map.fitBounds(L.latLngBounds([[v.lat, v.lng], [s.lat, s.lng]]).pad(0.5), { maxZoom: 18 }), 60);
   });
   $$('[data-hdel]', root).forEach(b => b.onclick = () => {
+    if (b.disabled) return;
     if (!b.dataset.sure) { b.dataset.sure = 1; b.textContent = 'Wirklich entfernen?'; return; }
     const n = clone(s); n.verlauf.splice(Number(b.dataset.hdel), 1); n.geaendert = new Date().toISOString();
-    enqueue({ t: 'put', sitzId: s.id, sitzName: s.name, sitz: n, msg: `Alten Standort von „${s.name}“ entfernt` });
-    openDetail(s.id);
+    enqueue({ t: 'put', sitzId: s.id, sitzName: s.name, sitz: n, msg: `Alten Standort von „${s.name}“ entfernt` }).then(() => openDetail(s.id));
   });
   wireFlaecheSection(s);
   $('#detEdit')?.addEventListener('click', () => openCapture('bearbeiten', s.id));
+  $('#detZustand')?.addEventListener('click', () => openZustand(s.id));
+  $('#detBehoben')?.addEventListener('click', e => mangelBehoben(s.id, e.currentTarget));
   $('#detMove')?.addEventListener('click', () => openCapture('umstellen', s.id));
   $('#umErf')?.addEventListener('click', () => openCapture('bearbeiten', s.id));
   $('#umFin')?.addEventListener('click', e => {
     const b = e.currentTarget, fehlt = !bereicheOf(s).length || !s.foto;
     if (fehlt && !b.dataset.sure) { b.dataset.sure = 1; b.textContent = 'Fehlt noch etwas – trotzdem abschließen?'; return; }
     const n = clone(s); delete n.umstellung; n.geaendert = new Date().toISOString();
-    enqueue({ t: 'put', sitzId: s.id, sitzName: s.name, sitz: n, msg: `Umstellung „${s.name}“ abgeschlossen` });
-    toast('Umstellung abgeschlossen ✓'); setTimeout(() => openDetail(s.id), 200);
+    b.disabled = true;
+    enqueue({ t: 'put', sitzId: s.id, sitzName: s.name, sitz: n, msg: `Umstellung „${s.name}“ abgeschlossen` }).then(() => openDetail(s.id));
+    toast('Umstellung abgeschlossen ✓');
   });
   $('#detDel')?.addEventListener('click', e => {
     const b = e.currentTarget;
@@ -1502,6 +1541,41 @@ function openDetail(id) {
     closeSheet();
     enqueue({ t: 'del', sitzId: s.id, sitzName: s.name, msg: `Hochsitz „${s.name}“ gelöscht`, delFiles: files });
   });
+}
+/** Mangel als behoben kennzeichnen: Zustand „In Ordnung“, Bemerkung (Mangelbeschreibung) wird geleert */
+function mangelBehoben(id, btn) {
+  const s = sitzById(id); if (!s || !canZustand() || s.zustand === 'gut') return;
+  if (!state.pw) { openPwSheet(() => openDetail(id)); return; }
+  if (btn && !btn.dataset.sure) { btn.dataset.sure = 1; btn.textContent = 'Wirklich behoben? Nochmal tippen'; return; }
+  if (btn) btn.disabled = true;
+  const n = clone(s); n.zustand = 'gut'; n.bemerkung = ''; n.geaendert = new Date().toISOString();
+  const wer = window.Konto?.user()?.name || 'unbekannt';
+  enqueue({ t: 'put', sitzId: s.id, sitzName: s.name, sitz: n, msg: `Hochsitz „${s.name}“: Mangel behoben${s.bemerkung ? ` (${s.bemerkung})` : ''}`.slice(0, 120),
+    hinweis: { art: 'zustand', title: '✅ Hochsitz wieder in Ordnung', body: `${s.name}${s.bemerkung ? ` – behoben: ${s.bemerkung}` : ''} (${wer})` } })
+    .then(() => openDetail(id));
+  toast(`✓ ${s.name}: Mangel behoben`);
+}
+/** Zustand eines Hochsitzes ändern (Einzelrecht „zustand“ – ohne Bearbeiten-Rechte für alles andere) */
+function openZustand(id) {
+  const s = sitzById(id); if (!s || !canZustand()) return;
+  if (!state.pw) { openPwSheet(() => openZustand(id)); return; }
+  let z = s.zustand;
+  openSheet(isAdmin() ? `Zustand: ${s.name}` : s.zustand !== 'gut' ? `Mangel ändern: ${s.name}` : `Mangel melden: ${s.name}`, `
+    ${isAdmin() ? '' : '<p class="hint">Ist am Sitz etwas kaputt? Wähle den Zustand und beschreib kurz den Mangel. Ist alles wieder in Ordnung, „gut“ wählen.</p>'}
+    <div class="field"><span>Zustand</span><div class="seg" id="zSeg">${Object.entries(ZUSTAND).map(([k, t]) => `<button type="button" data-v="${k}" class="${k === z ? 'on' : ''}">${t}</button>`).join('')}</div></div>
+    <label class="field"><span>${isAdmin() ? 'Bemerkung (z. B. was ist kaputt?)' : 'Was ist kaputt?'}</span><textarea id="zBem" rows="3">${esc(s.bemerkung)}</textarea></label>
+    <p class="hint">Die Änderung ist danach für alle sichtbar.</p>`,
+    `<button class="btn secondary" data-close>Abbrechen</button><button class="btn" id="zSave">Speichern</button>`);
+  $$('#zSeg button').forEach(b => b.onclick = () => { z = b.dataset.v; $$('#zSeg button').forEach(x => x.classList.toggle('on', x === b)); });
+  $('#zSave').onclick = () => {
+    const bem = $('#zBem').value.trim();
+    if (z === s.zustand && bem === s.bemerkung) { closeSheet(); return; }
+    const n = clone(s); n.zustand = z; n.bemerkung = bem; n.geaendert = new Date().toISOString();
+    closeSheet();
+    enqueue({ t: 'put', sitzId: s.id, sitzName: s.name, sitz: n, msg: `Hochsitz „${s.name}“: ${ZUSTAND[z]}${bem ? ` – ${bem}` : ''}`.slice(0, 120),
+      ...(z !== 'gut' ? { hinweis: { art: 'zustand', title: `🪜 Hochsitz: ${ZUSTAND[z]}`, body: `${s.name}${bem ? ` – ${bem}` : ''} (${window.Konto?.user()?.name || 'unbekannt'})` } } : {}) });
+    toast(`✓ ${s.name}: ${ZUSTAND[z]}`);
+  };
 }
 function sitzFiles(s) {
   const out = new Set();
@@ -1918,10 +1992,12 @@ function daysSince(iso) {
 const sinceTxt = iso => { const n = daysSince(iso); return n == null ? '' : n <= 0 ? 'heute' : n === 1 ? 'gestern' : `vor ${n} Tagen`; };
 const sortWartung = l => l.wartung.slice().sort((a, b) => (b.datum || '').localeCompare(a.datum || '') || (b.zeit || '').localeCompare(a.zeit || ''));
 const lastOf = (l, art) => sortWartung(l).find(w => !art || w.art === art) || null;
+/** Als leer gemeldet und seitdem nicht wieder bestückt? (Leer-Meldung ist der neueste Eintrag) */
+const leerGemeldet = l => { const w = lastOf(l); return w && w.art === 'leer' ? w : null; };
 
-function leckeIcon(pending) {
+function leckeIcon(pending, leer = false) {
   return L.divIcon({ className: 'hs-ico', iconSize: [46, 46], iconAnchor: [23, 23], tooltipAnchor: [0, 16],
-    html: `<div class="hs-wrap"><div class="hs-pin lk${pending ? ' pending' : ''}" style="background:${LECKE.color}">${svgIcon(LECKE.icon)}</div></div>` });
+    html: `<div class="hs-wrap"><div class="hs-pin lk${pending ? ' pending' : ''}${leer ? ' leer' : ''}" style="background:${LECKE.color}">${svgIcon(LECKE.icon)}</div></div>` });
 }
 function kirrIcon() {
   return L.divIcon({ className: 'hs-ico', iconSize: [30, 30], iconAnchor: [15, 15], tooltipAnchor: [0, -10],
@@ -1956,15 +2032,19 @@ function renderLeckenList(el) {
   const lb = l => lastOf(l, 'bestueckt')?.datum || '';
   if (sort === 'name') { /* schon nach Name */ }
   else if (sort === 'dist' && state.me) rows = rows.slice().sort((a, b) => distM(state.me, a) - distM(state.me, b));
-  else rows = rows.slice().sort((a, b) => lb(a).localeCompare(lb(b)) || a.name.localeCompare(b.name, 'de', { numeric: true }));
+  else rows = rows.slice().sort((a, b) => (leerGemeldet(b) ? 1 : 0) - (leerGemeldet(a) ? 1 : 0) || lb(a).localeCompare(lb(b)) || a.name.localeCompare(b.name, 'de', { numeric: true }));
   const nie = lk.filter(l => !lastOf(l, 'bestueckt')).length;
+  const leer = lk.filter(l => leerGemeldet(l)).length;
   el.innerHTML = `${listSeg()}
     <div class="card pad">
       <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px">
         <div><div style="font:600 30px/1 var(--serif);color:var(--green)">${lk.length}</div><div class="sub">${lk.length === 1 ? 'Salzlecke' : 'Salzlecken'} im Revier</div></div>
-        ${nie ? `<span class="badge maengel">${nie} noch nie bestückt</span>` : ''}
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+          ${leer ? `<span class="badge gesperrt">${leer} leer gemeldet</span>` : ''}
+          ${nie ? `<span class="badge maengel">${nie} noch nie bestückt</span>` : ''}
+        </div>
       </div>
-      ${isAdmin() && lk.length ? '<p class="hint" style="margin-top:8px">Mit ✓ hakst du eine Lecke als bestückt ab. Antippen öffnet das Wartungsbuch.</p>' : ''}
+      ${canLecke() && lk.length ? '<p class="hint" style="margin-top:8px">Mit ✓ hakst du eine Lecke als bestückt ab. Antippen öffnet das Wartungsbuch.</p>' : canLeerMelden() && lk.length ? '<p class="hint" style="margin-top:8px">Ist eine Lecke leer? Antippen → „Leer melden“.</p>' : ''}
     </div>
     ${lk.length ? `<div class="list-tools">
       <input type="search" id="listQ" placeholder="Suchen …" value="${esc(state.listQ || '')}" aria-label="Suchen">
@@ -1975,18 +2055,18 @@ function renderLeckenList(el) {
       </select>
     </div>` : ''}
     <div id="leckList">${rows.map(l => {
-      const b = lastOf(l, 'bestueckt'), w = lastOf(l);
+      const b = lastOf(l, 'bestueckt'), w = lastOf(l), lg = leerGemeldet(l);
       return `<div class="lk-row">
         <button class="sitz" data-lid="${esc(l.id)}">
           <div class="th" ${l.foto ? `data-img="${esc(l.foto.t)}"` : `style="background:${LECKE.color}"`}>${l.foto ? '' : svgIcon(LECKE.icon)}</div>
           <div style="min-width:0"><div class="nm">${esc(l.name)}</div>
             <div class="mt">${b ? `Bestückt ${dateDE(b.datum)} · <b>${sinceTxt(b.datum)}</b>` : '<b style="color:var(--warn)">noch nicht bestückt</b>'}</div>
-            ${w && w !== b ? `<div class="mt">${WARTUNG[w.art] || w.art} ${dateDE(w.datum)}</div>` : ''}
+            ${lg ? `<div class="mt"><b style="color:var(--warn)">⚠ Leer gemeldet ${dateDE(lg.datum)}</b></div>` : w && w !== b ? `<div class="mt">${WARTUNG[w.art] || w.art} ${dateDE(w.datum)}</div>` : ''}
             ${pend.has(l.id) ? '<div style="margin-top:5px"><span class="badge wait">nicht hochgeladen</span></div>' : ''}
           </div>
           <div class="ds" data-dist="${esc(l.id)}"></div>
         </button>
-        ${isAdmin() ? `<button class="tick${b && daysSince(b.datum) === 0 ? ' done' : ''}" data-tick="${esc(l.id)}" aria-label="Als bestückt abhaken">✓</button>` : ''}
+        ${canLecke() ? `<button class="tick${b && daysSince(b.datum) === 0 ? ' done' : ''}" data-tick="${esc(l.id)}" aria-label="Als bestückt abhaken">✓</button>` : ''}
       </div>`;
     }).join('') || (lk.length ? '<div class="card pad empty">Nichts gefunden.</div>' : `<div class="card pad empty"><p>Noch keine Salzlecken erfasst.${isAdmin() ? '<br>Auf der Karte „+ Erfassen“ → „Salzlecke“ tippen, wenn du an der Lecke stehst.' : ''}</p></div>`)}</div>
     <p class="hint" style="text-align:center">v${APP_VERSION}</p>`;
@@ -2005,38 +2085,43 @@ function renderLeckenList(el) {
 function openLecke(id) {
   const l = leckeById(id); if (!l) return;
   const pend = pendingIds().has(id);
-  const b = lastOf(l, 'bestueckt');
+  const b = lastOf(l, 'bestueckt'), lg = leerGemeldet(l);
   const log = sortWartung(l);
+  const buch = canLecke(), adm = isAdmin();
   openSheet(l.name, `
     ${l.foto ? `<div class="det-photo"><img data-img="${esc(l.foto.t)}" alt="Foto ${esc(l.name)}" id="lkFoto"></div>` : ''}
     <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="badge" style="background:${LECKE.color};color:#fff">Salzlecke</span>${pend ? '<span class="badge wait">noch nicht hochgeladen</span>' : ''}</div>
-    <div class="card pad lk-status">${b ? `<div class="sub">Zuletzt bestückt</div><div class="big">${dateDE(b.datum)}</div><div class="sub">${sinceTxt(b.datum)}</div>` : '<div class="big" style="color:var(--warn)">Noch nicht bestückt</div>'}</div>
+    <div class="card pad lk-status">${b ? `<div class="sub">Zuletzt bestückt</div><div class="big">${dateDE(b.datum)}</div><div class="sub">${sinceTxt(b.datum)}</div>` : '<div class="big" style="color:var(--warn)">Noch nicht bestückt</div>'}
+      ${lg ? `<div class="lk-leer">⚠ Leer gemeldet ${dateDE(lg.datum)}${lg.notiz ? ` – ${esc(lg.notiz)}` : ''}</div>` : ''}</div>
     ${l.bemerkung ? `<div class="note">${esc(l.bemerkung)}</div>` : ''}
     <dl class="facts">
       ${state.me ? `<dt>Entfernung</dt><dd>${distM(state.me, l) <= Math.max(10, state.me.acc || 0) ? 'Du bist an der Lecke' : `${distTxt(distM(state.me, l))} Richtung ${dirName(bearing(state.me, l))}`}</dd>` : ''}
-      <dt>Koordinaten</dt><dd>${coordTxt(l)}${l.acc ? ` <span class="sub">(±${Math.round(l.acc)} m)</span>` : ''}</dd>
+      ${adm ? `<dt>Koordinaten</dt><dd>${coordTxt(l)}${l.acc ? ` <span class="sub">(±${Math.round(l.acc)} m)</span>` : ''}</dd>` : ''}
     </dl>
-    <div class="btn-row"><button class="btn secondary small" id="lkMap">📍 Auf Karte zeigen</button><button class="btn secondary small" id="lkCopy">Koordinaten kopieren</button></div>
-    <h2 class="section">Wartungsbuch</h2>
+    <div class="btn-row"><button class="btn secondary small" id="lkMap">📍 Auf Karte zeigen</button>${adm ? '<button class="btn secondary small" id="lkCopy">Koordinaten kopieren</button>' : ''}</div>
+    ${buch ? `<h2 class="section">Wartungsbuch</h2>
     ${log.length ? `<div class="card pad"><ul class="hist">${log.map(w => `<li><i class="w-${esc(w.art)}"></i><div><b>${WARTUNG[w.art] || esc(w.art)}</b> · ${dateDE(w.datum)}${w.notiz ? `<small>${esc(w.notiz)}</small>` : ''}
       ${isAdmin() ? `<div><button class="btn ghost small" data-wdel="${esc(w.id)}" style="color:var(--warn);min-height:30px;padding:2px 0;margin-top:2px">Entfernen</button></div>` : ''}</div></li>`).join('')}</ul></div>` : '<p class="hint">Noch keine Einträge.</p>'}
-    ${isAdmin() ? `<div class="btn-row"><button class="btn secondary small" id="lkKontr">Kontrolliert</button><button class="btn secondary small" id="lkRep">Repariert</button><button class="btn secondary small" id="lkEdit">Bearbeiten</button></div>
-      <button class="btn danger block" id="lkDel" style="margin-top:18px">Salzlecke löschen</button>` : ''}`,
-    isAdmin() ? `<button class="btn" id="lkBest">✓ Bestückt</button>` : '');
+    <div class="btn-row"><button class="btn secondary small" id="lkKontr">Kontrolliert</button><button class="btn secondary small" id="lkRep">Repariert</button>${adm ? '<button class="btn secondary small" id="lkEdit">Bearbeiten</button>' : ''}</div>` : ''}
+    ${isAdmin() ? '<button class="btn danger block" id="lkDel" style="margin-top:18px">Salzlecke löschen</button>' : ''}`,
+    buch ? `${lg ? '' : '<button class="btn secondary" id="lkLeer">Leer melden</button>'}<button class="btn" id="lkBest">✓ Bestückt</button>`
+      : canLeerMelden() && !lg ? '<button class="btn" id="lkLeer">Leer melden</button>' : '');
   const root = $('#sheet');
   hydrateImages(root);
   $('#lkFoto')?.addEventListener('click', () => openViewer(l.foto.f, l.name));
   $('#lkMap').onclick = () => { closeSheet(); focusSitz(l); };
-  $('#lkCopy').onclick = async () => { try { await navigator.clipboard.writeText(coordTxt(l)); toast('Koordinaten kopiert'); } catch { toast(coordTxt(l), 5000); } };
+  if ($('#lkCopy')) $('#lkCopy').onclick = async () => { try { await navigator.clipboard.writeText(coordTxt(l)); toast('Koordinaten kopiert'); } catch { toast(coordTxt(l), 5000); } };
   $('#lkBest')?.addEventListener('click', () => openWartung(id, 'bestueckt'));
   $('#lkKontr')?.addEventListener('click', () => openWartung(id, 'kontrolliert'));
   $('#lkRep')?.addEventListener('click', () => openWartung(id, 'repariert'));
+  $('#lkLeer')?.addEventListener('click', () => openWartung(id, 'leer'));
   $('#lkEdit')?.addEventListener('click', () => openLeckeCapture('bearbeiten', id));
   $$('[data-wdel]', root).forEach(btn => btn.onclick = () => {
+    if (btn.disabled) return;
     if (!btn.dataset.sure) { btn.dataset.sure = 1; btn.textContent = 'Wirklich entfernen?'; return; }
+    btn.disabled = true;
     const n = clone(l); n.wartung = n.wartung.filter(w => w.id !== btn.dataset.wdel); n.geaendert = new Date().toISOString();
-    enqueue({ t: 'put', coll: 'lecken', sitzId: id, sitzName: l.name, sitz: n, msg: `Wartungseintrag bei „${l.name}“ entfernt` });
-    openLecke(id);
+    enqueue({ t: 'put', coll: 'lecken', sitzId: id, sitzName: l.name, sitz: n, msg: `Wartungseintrag bei „${l.name}“ entfernt` }).then(() => openLecke(id));
   });
   $('#lkDel')?.addEventListener('click', e => {
     const btn = e.currentTarget;
@@ -2047,23 +2132,31 @@ function openLecke(id) {
 }
 /** Wartung eintragen (Standard: heute, Bestückt) */
 function openWartung(id, art = 'bestueckt') {
-  const l = leckeById(id); if (!l || !isAdmin()) return;
+  const l = leckeById(id); if (!l) return;
+  const nurLeer = !canLecke();
+  if (nurLeer && (!canLeerMelden() || art !== 'leer')) return;
   if (!state.pw) { openPwSheet(() => openWartung(id, art)); return; }
   let a = art;
-  openSheet(l.name, `
-    <div class="field"><span>Was wurde gemacht?</span><div class="seg" id="wArt">${Object.entries(WARTUNG).map(([k, t]) => `<button type="button" data-v="${k}" class="${k === a ? 'on' : ''}">${t}</button>`).join('')}</div></div>
+  const arten = nurLeer ? { leer: WARTUNG.leer } : WARTUNG;
+  openSheet(art === 'leer' ? `Leer melden: ${l.name}` : l.name, `
+    ${nurLeer ? '<p class="hint" style="margin-top:0">Die Lecke ist leer und sollte bestückt werden? Dann hier melden – Sebastian sieht es in der Liste und auf der Karte.</p>'
+      : `<div class="field"><span>Was wurde gemacht?</span><div class="seg" id="wArt">${Object.entries(arten).map(([k, t]) => `<button type="button" data-v="${k}" class="${k === a ? 'on' : ''}">${k === 'leer' ? 'Leer' : t}</button>`).join('')}</div></div>`}
     <label class="field"><span>Datum</span><input type="date" id="wDatum" value="${todayISO()}"></label>
-    <label class="field"><span>Notiz (optional)</span><input id="wNotiz" placeholder="z. B. neuer Stein, Pfahl erneuert" autocomplete="off"></label>`,
-    `<button class="btn secondary" data-close>Abbrechen</button><button class="btn" id="wSave">Abhaken</button>`);
-  $$('#wArt button').forEach(b => b.onclick = () => { a = b.dataset.v; $$('#wArt button').forEach(x => x.classList.toggle('on', x === b)); });
+    <label class="field"><span>Notiz (optional)</span><input id="wNotiz" placeholder="${nurLeer ? 'z. B. Stein ganz weg, nur noch Reste' : 'z. B. neuer Stein, Pfahl erneuert'}" autocomplete="off"></label>`,
+    `<button class="btn secondary" data-close>Abbrechen</button><button class="btn" id="wSave">${nurLeer ? 'Leer melden' : 'Abhaken'}</button>`);
+  const knopf = () => { $('#wSave').textContent = a === 'leer' ? 'Leer melden' : `✓ ${WARTUNG[a]} eintragen`; };
+  $$('#wArt button').forEach(b => b.onclick = () => { a = b.dataset.v; $$('#wArt button').forEach(x => x.classList.toggle('on', x === b)); knopf(); });
+  if (!nurLeer) knopf();
   $('#wSave').onclick = () => {
     const datum = $('#wDatum').value || todayISO();
+    const notiz = $('#wNotiz').value.trim();
     const n = clone(l);
-    n.wartung.push({ id: uid(), datum, art: a, notiz: $('#wNotiz').value.trim(), zeit: new Date().toISOString() });
+    n.wartung.push({ id: uid(), datum, art: a, notiz, zeit: new Date().toISOString() });
     n.geaendert = new Date().toISOString();
     closeSheet();
-    enqueue({ t: 'put', coll: 'lecken', sitzId: id, sitzName: l.name, sitz: n, msg: `Salzlecke „${l.name}“: ${WARTUNG[a]} ${dateDE(datum)}` });
-    toast(`✓ ${l.name}: ${WARTUNG[a]}`);
+    enqueue({ t: 'put', coll: 'lecken', sitzId: id, sitzName: l.name, sitz: n, msg: `Salzlecke „${l.name}“: ${WARTUNG[a]} ${dateDE(datum)}`,
+      ...(a === 'leer' ? { hinweis: { art: 'leer', title: '🧂 Salzlecke leer gemeldet', body: `${l.name}${notiz ? ` – ${notiz}` : ''} (${dateDE(datum)}, ${window.Konto?.user()?.name || 'unbekannt'})` } } : {}) });
+    toast(a === 'leer' ? `${l.name}: leer gemeldet` : `✓ ${l.name}: ${WARTUNG[a]}`);
   };
 }
 
@@ -2300,7 +2393,20 @@ function openFlaeche(id) {
 }
 
 /* ================= Passwort ================= */
+/** Sperrbildschirm: „Mit Konto anmelden“ (und ggf. kein Passwort-Feld mehr) */
+function refreshLockKonto() {
+  if (!window.Konto?.enabled() || !$('#lockForm')) return;
+  if (!$('#lockKonto')) {
+    $('#lockBtn').insertAdjacentHTML('afterend', '<button type="button" class="btn secondary block" id="lockKonto" style="margin-top:8px">👤 Mit Konto anmelden</button>');
+    $('#lockKonto').addEventListener('click', () => Konto.openLogin({ over: true }));
+  }
+  const nur = Konto.nurKonten();
+  $('#lockPw').hidden = nur; $('#lockBtn').hidden = nur;
+  $('#lockKonto').className = nur ? 'btn block' : 'btn secondary block';
+  if (nur && !$('#lockMsg').classList.contains('err')) $('#lockMsg').textContent = 'Bitte mit deinem Konto anmelden.';
+}
 function showLock(reason) {
+  setTimeout(refreshLockKonto, 0);
   $('#lock').hidden = false;
   $('#lockMsg').textContent = reason === 'falsch' ? 'Passwort falsch oder geändert – bitte (neu) eingeben.' : 'Bitte das Passwort der Jagdgemeinschaft eingeben.';
   $('#lockMsg').classList.toggle('err', reason === 'falsch');
@@ -2313,7 +2419,10 @@ $('#lockForm').addEventListener('submit', async e => {
   state.pw = pw; $('#lockBtn').disabled = true;
   try {
     await load();
-    if ($('#lock').hidden) { lsSet(LS_PW, pw); flush(); }
+    if ($('#lock').hidden) {
+      lsSet(LS_PW, pw); flush();
+      if (window.Konto?.isAdmin() && Konto.dataPw() !== pw) Konto.setDataPw(pw, true).catch(() => {});
+    }
     else { state.pw = ''; }
   } finally { $('#lockBtn').disabled = false; }
 });
@@ -2337,6 +2446,7 @@ function openPwSheet(after) {
     if (a !== b) { $('#pwMsg').textContent = 'Die beiden Eingaben sind verschieden.'; return; }
     if (first) {
       state.pw = a; lsSet(LS_PW, a); closeSheet(); toast('Passwort gespeichert ✓');
+      if (window.Konto?.isAdmin()) Konto.setDataPw(a, true).catch(() => {});
       if (after) setTimeout(after, 200); else flush();
       return;
     }
@@ -2367,6 +2477,7 @@ async function reencryptAll(oldPw, newPw, progress) {
   const r = await putFile(DATA_PATH, b64encodeUtf8(JSON.stringify(await encryptJSON(data, newPw), null, 1) + '\n'), 'Passwort geändert', await getSha(DATA_PATH));
   if (!r.ok) throw new Error(`GitHub ${r.status}`);
   state.pw = newPw; lsSet(LS_PW, newPw);
+  if (window.Konto?.isAdmin()) await Konto.setDataPw(newPw, true).catch(() => toast('Neues Passwort konnte nicht im Konten-Server hinterlegt werden – unter „Konten verwalten“ erneut versuchen.', 6000));
   await load();
 }
 
@@ -2374,7 +2485,12 @@ async function reencryptAll(oldPw, newPw, progress) {
 function openSettings(fromLock = false) {
   const c = state.cfg;
   const voll = c.mode === 'voll';
+  const adm = isAdmin();
+  const ohneToken = !!CONF.nurKonto;
+  const kontoAktiv = !!window.Konto?.hatZugang();
   openSheet('Einstellungen', `
+    ${window.Konto?.settingsHtml() || ''}
+    ${ohneToken ? '' : `${CONF.api ? `<details ${voll ? 'open' : ''}><summary style="font-weight:600;cursor:pointer;padding:4px 0">Zugang mit GitHub-Token (bisherige Methode)</summary>` : ''}
     <fieldset><legend>Zugang auf diesem Gerät</legend>
       <div class="seg" id="sMode"><button type="button" data-v="" class="${voll ? '' : 'on'}">Nur ansehen</button><button type="button" data-v="voll" class="${voll ? 'on' : ''}">Voller Zugang</button></div>
       <div id="sVoll" ${voll ? '' : 'hidden'}>
@@ -2387,17 +2503,19 @@ function openSettings(fromLock = false) {
         <p class="hint" id="sTestMsg"></p>
       </div>
     </fieldset>
-    ${voll && !fromLock ? `<fieldset><legend>Reviergrenze</legend>
+    ${CONF.api ? '</details>' : ''}`}
+    ${adm && !fromLock ? `<fieldset><legend>Reviergrenze</legend>
       <p class="hint">${state.data.revier ? `Eingetragen: <b>${esc(state.data.revier.name || 'Revier')}</b> · ${areaTxt(state.data.revier.m2)} · Stand ${dateDE(state.data.revier.datum)}` : 'Noch keine Reviergrenze eingetragen.'} Import aus Google My Maps (KML/KMZ) oder GeoJSON.</p>
       <div class="btn-row"><button type="button" class="btn secondary small" id="sRev">${state.data.revier ? 'Neu importieren' : 'Reviergrenze importieren'}</button>${state.data.revier ? '<button type="button" class="btn ghost small" id="sRevDel" style="color:var(--warn)">Entfernen</button>' : ''}</div>
     </fieldset>` : ''}
-    ${voll && !fromLock ? `<fieldset><legend>Datenschutz</legend>
+    ${adm && !fromLock ? `<fieldset><legend>Datenschutz</legend>
       <p class="hint">${state.remoteEnc ? 'Daten und Fotos sind mit dem Passwort der Jagdgemeinschaft verschlüsselt.' : state.pw ? 'Passwort ist festgelegt – die Daten werden beim nächsten Speichern verschlüsselt.' : 'Noch kein Passwort festgelegt.'}</p>
       <button type="button" class="btn secondary small" id="sPw">${state.remoteEnc ? 'Passwort ändern' : state.pw ? 'Passwort neu festlegen' : 'Passwort festlegen'}</button>
     </fieldset>` : ''}
     <fieldset><legend>Dieses Gerät</legend>
-      <button type="button" class="btn secondary small" id="sClear">Gespeicherte Fotos auf dem Gerät löschen</button>
-      ${state.pw && !fromLock ? '<button type="button" class="btn ghost small" id="sForget" style="color:var(--warn)">Passwort auf diesem Gerät vergessen</button>' : ''}
+      <p class="hint">Damit die App schnell ist und auch ohne Netz im Revier läuft, merkt sie sich geladene Fotos auf dem Handy. Wird der Speicher knapp, kannst du sie hier löschen – <b>online bleibt alles erhalten</b>, die Fotos werden beim nächsten Ansehen einfach neu geladen.</p>
+      <button type="button" class="btn secondary small" id="sClear">Zwischengespeicherte Fotos löschen</button>
+      ${state.pw && !fromLock && !kontoAktiv ? '<p class="hint" style="margin-top:10px">Das Passwort der Jagdgemeinschaft ist auf diesem Handy gespeichert. Gibst du das Handy weiter, kannst du es hier entfernen.</p><button type="button" class="btn ghost small" id="sForget" style="color:var(--warn)">Passwort auf diesem Gerät vergessen</button>' : ''}
       <button type="button" class="btn ghost small" id="sReload">App neu laden</button>
       <p class="hint" id="sDevMsg"></p>
     </fieldset>
@@ -2406,10 +2524,12 @@ function openSettings(fromLock = false) {
       <p class="hint">Karten: Luftbild © Esri · TopPlusOpen © BKG · © OpenStreetMap-Mitwirkende</p>
     </fieldset>`,
     `<button class="btn secondary" data-close>Schließen</button><button class="btn" id="sSave">Übernehmen</button>`, { overLock: fromLock });
+  window.Konto?.wireSettings($('#sheet'), { over: fromLock });
   let mode = c.mode;
+  if (ohneToken) { $('#sSave').hidden = true; $('#sheetFoot .btn.secondary').textContent = 'Zurück'; }
   $$('#sMode button').forEach(b => b.onclick = () => { mode = b.dataset.v; $$('#sMode button').forEach(x => x.classList.toggle('on', x === b)); $('#sVoll').hidden = mode !== 'voll'; });
-  const read = () => ({ mode, token: $('#sToken').value.trim(), owner: $('#sOwner').value.trim(), repo: $('#sRepo').value.trim() });
-  $('#sTest').onclick = async () => {
+  const read = () => ohneToken ? { mode: '', token: '', owner: c.owner, repo: c.repo } : ({ mode, token: $('#sToken').value.trim(), owner: $('#sOwner').value.trim(), repo: $('#sRepo').value.trim() });
+  if ($('#sTest')) $('#sTest').onclick = async () => {
     const v = read(); const msg = $('#sTestMsg'); msg.textContent = 'Prüfe …';
     try {
       const r = await fetch(`https://api.github.com/repos/${encodeURIComponent(v.owner)}/${encodeURIComponent(v.repo)}`, { headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${v.token}` }, cache: 'no-store' });
@@ -2428,18 +2548,19 @@ function openSettings(fromLock = false) {
     const keep = new Set(state.queue.flatMap(o => o.files));
     const keys = (await idbKeys()) || [];
     let n = 0; for (const k of keys) if (String(k).startsWith('bin:') && !keep.has(k.slice(4))) { await idbDel(k); n++; }
-    $('#sDevMsg').textContent = `${n} Dateien gelöscht. Fotos werden bei Bedarf neu geladen.`;
+    $('#sDevMsg').textContent = `${n} Fotos vom Handy gelöscht – sie werden beim nächsten Ansehen neu geladen.`;
   };
   $('#sForget')?.addEventListener('click', () => { lsSet(LS_PW, undefined); lsSet(LS_DATA, undefined); state.pw = ''; location.reload(); });
   $('#sReload').onclick = async () => {
-    try { const regs = await navigator.serviceWorker?.getRegistrations?.(); await Promise.all((regs || []).map(r => r.unregister())); } catch { /* egal */ }
-    try { const keys = await caches.keys(); await Promise.all(keys.filter(k => !k.startsWith('hs-tiles')).map(k => caches.delete(k))); } catch { /* egal */ }
+    // nur diese App (andere Apps auf derselben Adresse bleiben unberührt)
+    try { const reg = await navigator.serviceWorker?.getRegistration?.(); await reg?.unregister(); } catch { /* egal */ }
+    try { const pre = (CONF.lsPrefix || '') + 'hs-'; const keys = await caches.keys(); await Promise.all(keys.filter(k => k.startsWith(pre) && !k.startsWith('hs-tiles')).map(k => caches.delete(k))); } catch { /* egal */ }
     location.replace(location.pathname + '?r=' + Date.now());
   };
   $('#sSave').onclick = () => {
     const v = read();
     Object.assign(state.cfg, v.mode === 'voll' ? v : { mode: '', token: '' });
-    if (v.mode !== 'voll' && location.hostname.endsWith('.github.io')) { const d = defaultCfg(); state.cfg.owner = d.owner; state.cfg.repo = d.repo; }
+    if ((v.mode !== 'voll' && location.hostname.endsWith('.github.io')) || CONF.test) { const d = defaultCfg(); state.cfg.owner = d.owner; state.cfg.repo = d.repo; }
     saveCfg(); closeSheet(); toast('Einstellungen gespeichert');
     render(); load();
   };
@@ -2449,8 +2570,16 @@ $('#refreshBtn').onclick = () => { load(); if (state.queue.length) flush(); };
 $$('.tab').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
 
 /* ================= Start ================= */
-function measureTop() { document.documentElement.style.setProperty('--top-h', $('.topbar').getBoundingClientRect().height + 'px'); }
+function measureTop() {
+  if (document.hidden) return; // im Hintergrund misst iOS die Kopfzeile (ohne Dynamic-Island-Rand) zu klein
+  const h = $('.topbar').getBoundingClientRect().height;
+  if (h > 40) document.documentElement.style.setProperty('--top-h', h + 'px');
+}
+const measureTopSpaet = () => [0, 250, 800].forEach(t => setTimeout(() => { measureTop(); map?.invalidateSize(); }, t));
 window.addEventListener('resize', () => { measureTop(); map?.invalidateSize(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) measureTopSpaet(); });
+window.addEventListener('pageshow', measureTopSpaet);
+window.addEventListener('orientationchange', measureTopSpaet);
 window.addEventListener('online', () => flush());
 /** Uhrzeit-abhängige Anzeigen (Sonnen-Kachel) sofort und dann immer zur vollen Minute neu zeichnen.
  *  Zeitgeber laufen im Hintergrund (v. a. iPhone) nicht weiter – deshalb auch beim Zurückkommen in die App. */
@@ -2473,6 +2602,15 @@ setInterval(() => { if (document.visibilityState === 'visible' && $('#sheet').hi
 
 (async function start() {
   measureTop();
+  window.Konto?.init({
+    ui: { openSheet: (t, b, f, over) => openSheet(t, b, f, { overLock: over }), closeSheet: () => closeSheet(), toast },
+    getPw: () => state.pw,
+    setPw: async pw => { state.pw = pw; lsSet(LS_PW, pw); await load(); },
+    onChange: () => { refreshLockKonto(); if (state.loaded) { render(); updateBanner(); if (state.queue.length && canWrite()) flush(); } },
+  });
+  refreshLockKonto();
+  // Nur noch Konten: ohne angemeldetes Konto mit Zugang gilt ein früher gespeichertes Gruppen-Passwort nicht mehr
+  if (CONF.nurKonto && state.pw && !window.Konto?.hatZugang()) { state.pw = ''; lsSet(LS_PW, undefined); }
   initMap();
   flowInit();
   switchTab(state.view.tab === 'liste' ? 'liste' : 'karte', true);
@@ -2483,18 +2621,37 @@ setInterval(() => { if (document.visibilityState === 'visible' && $('#sheet').hi
   loadWind(true);
   load._last = Date.now();
   await load();
+  window.Konto?.pushFrageStart?.();
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
-    navigator.serviceWorker.register('sw.js').then(reg => {
+    const hatteSW = !!navigator.serviceWorker.controller;
+    let neu = false;
+    const reloadOnce = () => { if (!neu) { neu = true; location.reload(); } };
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (hatteSW) reloadOnce(); });
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
+      const anbieten = w => {
+        const b = $('#banner'); b.className = 'banner'; b.hidden = false;
+        b.innerHTML = '<span>✨ Neue Version verfügbar</span><button class="btn small" id="updBtn">Neu laden</button>';
+        $('#updBtn').onclick = () => {
+          b.innerHTML = '<span>Neue Version wird geladen …</span>';
+          // iPhone-Web-Apps melden den Wechsel nicht immer zuverlässig → mehrere Wege zum Neuladen
+          w.addEventListener('statechange', () => { if (w.state === 'activated') reloadOnce(); });
+          w.postMessage('skipWaiting');
+          setTimeout(reloadOnce, 1500);
+        };
+      };
+      // schon fertig geladene, aber noch wartende Version (z. B. Hinweis beim letzten Mal übersehen)
+      if (reg.waiting && navigator.serviceWorker.controller) anbieten(reg.waiting);
       reg.addEventListener('updatefound', () => {
         const nw = reg.installing;
-        nw?.addEventListener('statechange', () => {
-          if (nw.state === 'installed' && navigator.serviceWorker.controller) {
-            const b = $('#banner'); b.className = 'banner'; b.hidden = false;
-            b.innerHTML = '<span>✨ Neue Version verfügbar</span><button class="btn small" id="updBtn">Neu laden</button>';
-            $('#updBtn').onclick = () => { nw.postMessage('skipWaiting'); setTimeout(() => location.reload(), 300); };
-          }
-        });
+        nw?.addEventListener('statechange', () => { if (nw.state === 'installed' && navigator.serviceWorker.controller) anbieten(nw); });
       });
+      // iPhone startet die App beim Zurückholen aus dem Hintergrund nicht neu → dann selbst nach Updates schauen
+      let zuletzt = Date.now();
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden || Date.now() - zuletzt < 60e3) return;
+        zuletzt = Date.now(); reg.update().catch(() => {});
+      });
+      setInterval(() => reg.update().catch(() => {}), 30 * 60e3);
     }).catch(() => { /* egal */ });
   }
 })();
