@@ -6,5 +6,5 @@ self.JAGD_CFG = {
   push: true,
   owner: 'Grunzelthuine',
   repo: 'Hochsitze',
-  // nurKonto: true,  // später einschalten: nur noch Anmeldung mit Konto (kein Passwort-Feld, kein Token)
+  nurKonto: true,           // nur noch Anmeldung mit Konto (kein Passwort-Feld, kein Token)
 };
