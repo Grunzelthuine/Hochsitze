@@ -7,7 +7,7 @@
  */
 'use strict';
 
-const APP_VERSION = '1.15.4';
+const APP_VERSION = '1.15.5';
 /* Einstellungen je Installation (config.js): Konten-Server, Test-Umgebung */
 const CONF = self.JAGD_CFG || {};
 const LSP = CONF.lsPrefix || '';
@@ -1391,9 +1391,12 @@ function openSheet(title, body, foot = '', { overLock = false } = {}) {
   if (sheetCleanup) { const c = sheetCleanup; sheetCleanup = null; c(); }
   if ($('#sheet').hidden) history.pushState({ hs: 'sheet' }, '');
   $('#sheetTitle').textContent = title;
-  $('#sheetBody').innerHTML = body;
+  // iOS: Scrollbereich jedes Mal neu anlegen – sonst lässt er sich nach „Unterfenster → Zurück → wieder öffnen“ manchmal nicht mehr scrollen
+  const alt = $('#sheetBody'), neu = alt.cloneNode(false); alt.replaceWith(neu);
+  neu.innerHTML = body;
   $('#sheetFoot').innerHTML = foot || '<button class="btn secondary block" data-close>Zurück</button>';
   $('#sheet').hidden = false;
+  document.body.classList.add('sheet-offen');
   flowCheck();
   $('#sheet').style.zIndex = overLock ? 1160 : '';
   $('#sheetBody').scrollTop = 0;
@@ -1401,7 +1404,10 @@ function openSheet(title, body, foot = '', { overLock = false } = {}) {
 function closeSheet(fromPop = false) {
   if ($('#sheet').hidden) return;
   if (sheetCleanup) { const c = sheetCleanup; sheetCleanup = null; c(); }
+  // offene Tastatur schließen, sonst bleibt die Ansicht auf iOS verschoben
+  if (document.activeElement && $('#sheet').contains(document.activeElement)) document.activeElement.blur();
   $('#sheet').hidden = true;
+  document.body.classList.remove('sheet-offen');
   flowCheck();
   if (!fromPop && history.state?.hs === 'sheet') { ignorePop++; history.back(); }
 }
